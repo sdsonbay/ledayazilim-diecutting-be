@@ -165,6 +165,30 @@ const cachedModel = (def: TemplateDefinition): TemplateModel | null => {
 export const recognitionModels = (): TemplateModel[] =>
   templates.map(cachedModel).filter((m): m is TemplateModel => m !== null)
 
+/** Önceden hesaplanmış modeller (JSON): tarayıcı demosu gibi ısıtmanın pahalı olduğu yerler için. */
+export const exportRecognitionModels = (): string =>
+  JSON.stringify(
+    recognitionModels().map((m) => ({
+      id: m.def.id,
+      base: m.base,
+      sig: m.sig,
+      params: m.params.map((p) => p.key),
+      jacobian: m.jacobian.map((row) => row.map((v) => (Number.isFinite(v) ? Math.round(v * 1e6) / 1e6 : null))),
+    })),
+  )
+
+export const loadRecognitionModels = (json: string): void => {
+  const list = JSON.parse(json) as { id: string; base: Record<string, ParamValue>; sig: Signature; params: string[]; jacobian: (number | null)[][] }[]
+  for (const entry of list) {
+    const def = templates.find((t) => t.id === entry.id)
+    if (!def) continue
+    const byKey = new Map(fittable(def).map((p) => [p.key, p]))
+    const params = entry.params.map((k) => byKey.get(k)).filter((p): p is NumberParam => Boolean(p))
+    if (params.length !== entry.params.length) continue
+    modelCache.set(def.id, { def, params, base: entry.base, sig: entry.sig, jacobian: entry.jacobian.map((row) => row.map((v) => (v === null ? Number.NaN : v))) })
+  }
+}
+
 /**
  * Modelleri olay döngüsünü bloklamadan arka planda kurar (sunucu açılışında çağrılır;
  * ~15 sn sürer, her şablondan sonra sıra diğer isteklere verilir).

@@ -51,4 +51,4 @@ export { specialTemplates, specialTemplate, SPECIAL_SPECS, type SpecialSpec } fr
 export { tagWrapTemplates, tagWrapTemplate, TAG_WRAP_SPECS, type TagWrapSpec } from './catalog/tags-wraps-dct.ts'
 export { rigidTemplates, rigidTemplate, RIGID_SPECS, type RigidSpec } from './catalog/rigid-dct.ts'
 export { appendDieline } from './compose.ts'
-export { recognizeDieline, recognitionModels, warmRecognition, type TemplateMatch } from './recognize.ts'
+export { exportRecognitionModels, loadRecognitionModels, recognizeDieline, recognitionModels, warmRecognition, type TemplateMatch } from './recognize.ts'

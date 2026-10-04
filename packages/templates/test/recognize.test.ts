@@ -30,3 +30,11 @@ test('tanıma: oluklu FEFCO 0427 posta kutusu', () => {
   assert.equal(match?.templateId, 'fefco-0427')
   for (const [k, v] of Object.entries(vars)) assert.ok(Math.abs((match!.variables[k] as number) - v) <= 0.2, `${k}`)
 })
+
+test('önceden hesaplanmış modeller geri yüklenince tanıma aynı sonucu verir', async () => {
+  const { exportRecognitionModels, loadRecognitionModels } = await import('../src/index.ts')
+  loadRecognitionModels(exportRecognitionModels())
+  const match = recognizeDieline(asForeign(generateDieline('ecma-a20-20', { length: 70, width: 40, height: 110 })), 30_000)
+  assert.equal(match?.templateId, 'ecma-a20-20')
+  assert.equal(match?.variables.length, 70)
+})
