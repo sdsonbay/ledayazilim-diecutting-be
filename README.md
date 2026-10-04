@@ -54,6 +54,7 @@ veya API anahtarıyla `x-api-key` + `x-secret-key`.
 | `PUBLIC_BASE_URL` | Ör. `https://api-diecutting.ledayazilim.com` — JWT `iss` olarak da kullanılır |
 | `CORS_ORIGINS` | Virgülle ayrılmış web origin'leri |
 | `GUEST_CREDITS` / `SIGNUP_CREDITS` | Başlangıç kredileri |
+| `MOCK_PAYMENTS` | `true`: deneme kredi satın alımı açık (ödeme yok). Varsayılan yalnız local/dev'de açık; prod'da `false` |
 
 ## CI/CD (GitHub Actions)
 
