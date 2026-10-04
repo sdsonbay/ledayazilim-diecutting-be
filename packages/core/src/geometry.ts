@@ -270,7 +270,7 @@ export function flattenPath(commands: readonly PathCommand[], tolerance = 0.05):
         break
       }
       case 'Z':
-        current.push(subpathStart)
+        current.push({ ...subpathStart })
         cursor = subpathStart
         flush()
         break

@@ -561,15 +561,24 @@ const assignRoles = (
     return Math.abs(d1.dx * d2.dy - d1.dy * d2.dx) < 0.02 && Math.abs(d1.len - d2.len) < Math.max(1, d1.len * 0.03)
   }
 
-  // Gövde zinciri: kökten, kök kırımlarına paralel ve aynı uzunlukta kırımlarla ilerleyen paneller.
-  const body = new Set([rootIdx])
+  // Gövde zinciri: kökten tek bir yönde, paralel ve aynı uzunlukta kırımlarla ilerleyen paneller.
+  // Her yön ayrı denenir (tepside iki yön de 3 panelde kalır; tüpte bir yön ≥ 4 panele uzar).
   const rootKids = children.get(rootIdx) ?? []
-  const seedKids = rootKids.filter((c) => rootKids.some((o) => o !== c && parallel(c, o)) || (children.get(c) ?? []).some((g) => parallel(c, g)))
-  const stack = [...seedKids]
-  while (stack.length) {
-    const c = stack.pop()!
-    body.add(c)
-    for (const g of children.get(c) ?? []) if (parallel(c, g) && !body.has(g)) stack.push(g)
+  const chainFrom = (seed: number[]): Set<number> => {
+    const chain = new Set([rootIdx])
+    const stack = [...seed]
+    while (stack.length) {
+      const c = stack.pop()!
+      chain.add(c)
+      for (const g of children.get(c) ?? []) if (parallel(c, g) && !chain.has(g)) stack.push(g)
+    }
+    return chain
+  }
+  let body = new Set([rootIdx])
+  for (const c of rootKids) {
+    const group = rootKids.filter((o) => o === c || parallel(c, o))
+    const chain = chainFrom(group)
+    if (chain.size > body.size) body = chain
   }
   const bodyList = [...body].filter((b) => b !== rootIdx)
   const chainDir = bodyList.length ? dirOf(bodyList[0]!) : null

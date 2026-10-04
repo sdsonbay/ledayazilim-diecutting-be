@@ -375,8 +375,23 @@ export function recognizeDieline(imported: Dieline, budgetMs = 4000): TemplateMa
     } catch {
       continue
     }
-    const { deviation, coverage } = compare(transform(segmentsOf(generated), { k: 0, m: false }), cand.view.moved)
-    if (deviation > 4) continue
+    let { deviation, coverage } = compare(transform(segmentsOf(generated), { k: 0, m: false }), cand.view.moved)
+    // Ölçüler genelde tam milimetredir: yuvarlamak sapmayı büyütmüyorsa yuvarlanmış hali al.
+    const rounded = clampValues(cand.model, { ...fitted.values, ...Object.fromEntries(cand.model.params.map((p) => [p.key, Math.round(fitted.values[p.key] as number)])) })
+    if (cand.model.params.some((p) => rounded[p.key] !== fitted.values[p.key])) {
+      try {
+        const alt = compare(transform(segmentsOf(generateDieline(cand.model.def.id, rounded)), { k: 0, m: false }), cand.view.moved)
+        if (alt.deviation <= deviation + 0.03 && alt.coverage >= coverage - 0.01) {
+          fitted.values = rounded
+          deviation = alt.deviation
+          coverage = alt.coverage
+        }
+      } catch {
+        /* yuvarlanmış değer geçersizse uydurulmuş değerle devam */
+      }
+    }
+    // Zayıf benzerlik öneri olarak gösterilmez (ör. tepsiye zarf): çizgilerin en az %85'i örtüşmeli.
+    if (deviation > 4 || coverage < 0.85) continue
     const variables = Object.fromEntries(cand.model.params.map((p) => [p.key, fitted.values[p.key]!]))
     const match: TemplateMatch = {
       templateId: cand.model.def.id,

@@ -226,3 +226,17 @@ test('yazı plakası PDF: tüm paneller katlama ağacına bağlanır', () => {
     assert.ok(Math.min(...ys) < 55 || Math.max(...ys) > 130, `${flap!.id} üst veya alt kanat olmalı`)
   }
 })
+
+test('Z ile kapanan SVG yolunun ilk noktası da y ekseninde çevrilir', () => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120">
+  <path stroke="#E4002B" fill="none" d="M20 20 L180 20 L180 100 L20 100 Z"/>
+  <path stroke="#E4002B" fill="none" d="M90 50 L110 50 L110 70 L90 70 Z"/>
+  <path stroke="#00A651" fill="none" d="M100 20 L100 100"/>
+</svg>`
+  const imported = importDieline(svg, 'closed.svg')
+  for (const p of imported.paths) {
+    for (const c of p.commands) if ('y' in c) assert.ok(c.y <= 0, `${p.layer} y=${c.y} çevrilmemiş`)
+  }
+  assert.equal(imported.panels.length, 2)
+  assert.ok(imported.panels.some((p) => (p.holes?.length ?? 0) > 0) || imported.panels.length === 2)
+})

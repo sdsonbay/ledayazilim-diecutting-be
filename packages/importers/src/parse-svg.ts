@@ -330,9 +330,8 @@ export const parseSvg = (source: string): ImportedPath[] => {
   const out: ImportedPath[] = pending.map((p) => ({ layer: resolveLayer(p.hint, colorMap), points: p.points }))
 
   if (!nativeYUp) {
-    for (const path of out) {
-      for (const p of path.points) p.y = -p.y
-    }
+    // Yeni nesneler: kapalı yolda ilk ve son nokta aynı nesne olabilir (yerinde çevirmek iki kez çevirirdi).
+    for (const path of out) path.points = path.points.map((p) => ({ x: p.x, y: -p.y }))
   }
   return out
 }
