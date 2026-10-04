@@ -1,0 +1,16 @@
+{
+  "name": "@diecut/importers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hazır bıçak izi (SVG/DXF/PDF/PNG/JPG) → panel/kırım ağacı",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@diecut/core": "*",
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0"
+  }
+}

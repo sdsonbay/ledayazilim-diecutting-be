@@ -1,0 +1,65 @@
+name: Deploy prod
+
+# Manuel: Actions → "Deploy prod" → Run workflow.
+# "production" environment'ında required reviewers açık olduğundan onay gelmeden çalışmaz.
+# Yeniden derleme yok: dev'de doğrulanan imaj prod tag'iyle işaretlenir.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Yayınlanacak imaj tag'i (örn. sha-1a2b3c4). Boş bırakılırsa dev'de çalışan sürüm."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kaynak tag
+        id: src
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          KUBE_OBJECTS_TOKEN: ${{ secrets.KUBE_OBJECTS_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG}"
+          if [ -z "$tag" ]; then
+            tag=$(curl -fsSL -H "Authorization: Bearer ${KUBE_OBJECTS_TOKEN}" \
+              -H "Accept: application/vnd.github.raw" \
+              "https://api.github.com/repos/sdsonbay/ledayazilim-diecutting-kubeobjects/contents/be/overlays/dev/kustomization.yaml" \
+              | sed -n 's/^[[:space:]]*newTag:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}/\1/p')
+          fi
+          [[ "$tag" =~ ^sha-[0-9a-f]{7,40}$ ]] || { echo "Geçersiz tag: '$tag'" >&2; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "prod=prod-${tag#sha-}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: İmajı prod olarak işaretle
+        run: |
+          docker buildx imagetools create \
+            -t "$IMAGE:${{ steps.src.outputs.prod }}" \
+            -t "$IMAGE:prod-latest" \
+            "$IMAGE:${{ steps.src.outputs.tag }}"
+      - name: kube-objects prod tag
+        env:
+          KUBE_OBJECTS_TOKEN: ${{ secrets.KUBE_OBJECTS_TOKEN }}
+        run: ci/bump-kube-objects-image.sh be prod "${{ steps.src.outputs.prod }}"
+      - name: Özet
+        run: echo "### BE prod → \`${{ steps.src.outputs.prod }}\`" >> "$GITHUB_STEP_SUMMARY"

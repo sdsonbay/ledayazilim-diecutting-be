@@ -1,0 +1,11 @@
+{
+  "name": "@diecut/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bıçak izi geometri motoru — saf TypeScript, bağımlılıksız",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts"
+}
