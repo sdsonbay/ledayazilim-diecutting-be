@@ -3,7 +3,7 @@ import { readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
-import { AuthError, hashPassword, normalizeEmail, verifyPassword } from './auth.ts'
+import { AuthError, burnPasswordCheck, hashPassword, normalizeEmail, verifyPassword } from './auth.ts'
 import { config } from './config.ts'
 import { findCreditPackage } from './credits.ts'
 
@@ -20,9 +20,13 @@ export async function migrate(): Promise<void> {
   const files = readdirSync(dir)
     .filter((name) => name.endsWith('.sql'))
     .sort()
-  for (const file of files) {
-    await sql.file(join(dir, file))
-  }
+  // Birden çok pod aynı anda açılırsa göçler sırayla çalışsın.
+  await sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(73120419)`
+    for (const file of files) {
+      await tx.file(join(dir, file))
+    }
+  })
 }
 
 export interface UserRow {
@@ -49,7 +53,11 @@ export async function registerUser(input: { email: string; password: string; nam
     INSERT INTO users (email, name, password_hash, credits, plan)
     VALUES (${email}, ${input.name?.trim() || null}, ${hashPassword(input.password)}, ${config.signupCredits}, 'free')
     RETURNING id, email, name, plan, credits, password_hash
-  `
+  `.catch((error: unknown) => {
+    // Eşzamanlı iki kayıt: benzersiz e-posta indeksi ikincisini reddeder.
+    if ((error as { code?: string }).code === '23505') throw new AuthError('Bu e-posta ile zaten bir hesap var', 409, 'email_taken')
+    throw error
+  })
   const user = rows[0]
   if (!user) throw new Error('Kayıt oluşturulamadı')
   await sql`
@@ -67,6 +75,7 @@ export async function loginUser(email: string, password: string): Promise<UserRo
     LIMIT 1
   `
   const user = rows[0]
+  if (!user?.password_hash) burnPasswordCheck(password)
   if (!user?.password_hash || !verifyPassword(password, user.password_hash)) {
     throw new AuthError('E-posta veya şifre hatalı', 401, 'invalid_credentials')
   }

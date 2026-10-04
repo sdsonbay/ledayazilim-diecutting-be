@@ -30,6 +30,12 @@ export const hashPassword = (password: string): string => {
   return `scrypt$${salt.toString('base64url')}$${hash.toString('base64url')}`
 }
 
+/** Kullanıcı yokken de aynı sürede yanıt vermek için (e-posta varlığı zamanlamadan anlaşılmasın). */
+const DUMMY_HASH = hashPassword(randomBytes(12).toString('hex'))
+export const burnPasswordCheck = (password: string): void => {
+  verifyPassword(password, DUMMY_HASH)
+}
+
 export const verifyPassword = (password: string, stored: string): boolean => {
   const [scheme, salt, hash] = stored.split('$')
   if (scheme !== 'scrypt' || !salt || !hash) return false
@@ -66,7 +72,10 @@ export const normalizeEmail = (email: string): string => email.trim().toLowerCas
 
 export const validateCredentials = (email: string, password: string, name?: string): void => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new AuthError('Geçerli bir e-posta girin', 400, 'invalid_email')
+  if (email.length > 254) throw new AuthError('Geçerli bir e-posta girin', 400, 'invalid_email')
   if (password.length < 8) throw new AuthError('Şifre en az 8 karakter olmalı', 400, 'password_too_short')
+  // scrypt maliyeti girdiyle büyür; dev şifreyle CPU tüketilmesin.
+  if (password.length > 200) throw new AuthError('Şifre en fazla 200 karakter olabilir', 400, 'password_too_long')
   if (name !== undefined && name.trim().length > 80) throw new AuthError('Ad çok uzun', 400, 'name_too_long')
 }
 

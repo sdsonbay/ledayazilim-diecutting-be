@@ -202,72 +202,118 @@ const placeGrid = (
   return out
 }
 
-const betterPack = (a: ImposePlacement[], b: ImposePlacement[]): boolean => {
-  if (a.length !== b.length) return a.length > b.length
-  const mixedA = a.some((p) => p.rotation !== a[0]?.rotation)
-  const mixedB = b.some((p) => p.rotation !== b[0]?.rotation)
-  if (mixedA !== mixedB) return !mixedA
-  const zeroA = a.filter((p) => p.rotation === 0).length
-  const zeroB = b.filter((p) => p.rotation === 0).length
-  return zeroA > zeroB
+/** Yerleşim özeti: arama yalnız sayar, yerleşimler en iyi seçimden sonra bir kez üretilir. */
+interface PackScore {
+  /** Toplam adet. */
+  n: number
+  /** 0° yerleşen adet. */
+  zero: number
+  /** Kullanılan yönler: bit0 = 0°, bit1 = 90°. */
+  mask: number
+  choice: PackChoice | null
 }
 
-/** Guillotine: ana ızgara + sağ/üst kalan şeritte diğer yön. */
-const packRect = (
-  rect: Rect,
-  bounds: Rect,
-  gapX: number,
-  gapY: number,
-  allowed: readonly (0 | 90)[],
-  depth: number,
-): ImposePlacement[] => {
-  if (depth > 4 || rect.width <= EPS || rect.height <= EPS) return []
-  let best: ImposePlacement[] = []
+interface PackChoice {
+  rot: 0 | 90
+  cols: number
+  rows: number
+  right: boolean
+  top: boolean
+}
+
+const EMPTY_SCORE: PackScore = { n: 0, zero: 0, mask: 0, choice: null }
+
+/** Daha çok adet; eşitse tek yön; o da eşitse daha çok 0°. */
+const betterScore = (a: PackScore, b: PackScore): boolean => {
+  if (a.n !== b.n) return a.n > b.n
+  const mixedA = a.mask === 3
+  const mixedB = b.mask === 3
+  if (mixedA !== mixedB) return !mixedA
+  return a.zero > b.zero
+}
+
+/** Ana ızgaradan geri çekilebilecek en fazla sütun/sıra. */
+const SPAN_LIMIT = 8
+
+const keyOf = (w: number, h: number, depth: number) => `${round(w, 6)}x${round(h, 6)}@${depth}`
+
+/**
+ * Guillotine: ana ızgara + sağ/üst kalan şeritte diğer yön.
+ * Alt problemler (aynı boyutta kalan şerit) önbellekten gelir; eskiden her aday için
+ * yerleşim dizileri baştan üretildiği için küçük kutu + büyük tabaka dakikalar sürüyordu.
+ */
+const createPacker = (bounds: Rect, gapX: number, gapY: number, allowed: readonly (0 | 90)[]) => {
+  const memo = new Map<string, PackScore>()
   const minSide = Math.min(bounds.width, bounds.height)
-  for (const rot of allowed) {
-    const { w: pw, h: ph } = pieceSize(bounds, rot)
-    const { cols: maxC, rows: maxR } = packGrid(rect.width, rect.height, pw, ph, gapX, gapY)
-    if (maxC === 0 || maxR === 0) continue
-    for (let cols = maxC; cols >= 1; cols--) {
-      for (let rows = maxR; rows >= 1; rows--) {
-        if (cols !== maxC && rows !== maxR) continue
-        const nestedW = cols * pw + (cols - 1) * gapX
-        const nestedH = rows * ph + (rows - 1) * gapY
-        const placed = placeGrid(rect.x, rect.y, cols, rows, pw, ph, gapX, gapY, rot)
-        const rest: ImposePlacement[] = []
-        const rightW = rect.width - nestedW - (nestedW > 0 ? gapX : 0)
-        if (rightW + EPS >= minSide) {
-          rest.push(
-            ...packRect(
-              { x: rect.x + nestedW + (nestedW > 0 ? gapX : 0), y: rect.y, width: rightW, height: rect.height },
-              bounds,
-              gapX,
-              gapY,
-              allowed,
-              depth + 1,
-            ),
-          )
+
+  const restOf = (w: number, h: number, pw: number, ph: number, cols: number, rows: number) => {
+    const nestedW = cols * pw + (cols - 1) * gapX
+    const nestedH = rows * ph + (rows - 1) * gapY
+    const rightW = w - nestedW - (nestedW > 0 ? gapX : 0)
+    const topH = h - nestedH - (nestedH > 0 ? gapY : 0)
+    return { nestedW, nestedH, rightW, topH, right: rightW + EPS >= minSide, top: topH + EPS >= minSide && nestedW > EPS }
+  }
+
+  const score = (w: number, h: number, depth: number): PackScore => {
+    if (depth > 4 || w <= EPS || h <= EPS) return EMPTY_SCORE
+    const key = keyOf(w, h, depth)
+    const hit = memo.get(key)
+    if (hit) return hit
+    let best: PackScore = EMPTY_SCORE
+    let found = false
+    for (const rot of allowed) {
+      const { w: pw, h: ph } = pieceSize(bounds, rot)
+      const { cols: maxC, rows: maxR } = packGrid(w, h, pw, ph, gapX, gapY)
+      if (maxC === 0 || maxR === 0) continue
+      // Tam ızgaradan en çok SPAN_LIMIT sütun/sıra geri çekilmeyi dene: kalan şeride diğer
+      // yönü sığdırmak için daha fazlası pratikte kazanç getirmez, aramayı ise patlatır.
+      const minC = Math.max(1, maxC - SPAN_LIMIT)
+      const minR = Math.max(1, maxR - SPAN_LIMIT)
+      for (let cols = maxC; cols >= minC; cols--) {
+        for (let rows = maxR; rows >= minR; rows--) {
+          if (cols !== maxC && rows !== maxR) continue
+          const r = restOf(w, h, pw, ph, cols, rows)
+          const right = r.right ? score(r.rightW, h, depth + 1) : EMPTY_SCORE
+          const top = r.top ? score(r.nestedW, r.topH, depth + 1) : EMPTY_SCORE
+          const placed = cols * rows
+          const next: PackScore = {
+            n: placed + right.n + top.n,
+            zero: (rot === 0 ? placed : 0) + right.zero + top.zero,
+            mask: (rot === 0 ? 1 : 2) | right.mask | top.mask,
+            choice: { rot, cols, rows, right: r.right, top: r.top },
+          }
+          if (!found || betterScore(next, best)) {
+            best = next
+            found = true
+          }
         }
-        const topH = rect.height - nestedH - (nestedH > 0 ? gapY : 0)
-        if (topH + EPS >= minSide && nestedW > EPS) {
-          rest.push(
-            ...packRect(
-              { x: rect.x, y: rect.y + nestedH + (nestedH > 0 ? gapY : 0), width: nestedW, height: topH },
-              bounds,
-              gapX,
-              gapY,
-              allowed,
-              depth + 1,
-            ),
-          )
-        }
-        const next = placed.concat(rest)
-        if (best.length === 0 || betterPack(next, best)) best = next
       }
     }
+    memo.set(key, best)
+    return best
   }
-  return best
+
+  const build = (rect: Rect, depth: number): ImposePlacement[] => {
+    if (depth > 4 || rect.width <= EPS || rect.height <= EPS) return []
+    const choice = score(rect.width, rect.height, depth).choice
+    if (!choice) return []
+    const { w: pw, h: ph } = pieceSize(bounds, choice.rot)
+    const r = restOf(rect.width, rect.height, pw, ph, choice.cols, choice.rows)
+    const out = placeGrid(rect.x, rect.y, choice.cols, choice.rows, pw, ph, gapX, gapY, choice.rot)
+    if (choice.right) {
+      out.push(...build({ x: rect.x + r.nestedW + (r.nestedW > 0 ? gapX : 0), y: rect.y, width: r.rightW, height: rect.height }, depth + 1))
+    }
+    if (choice.top) {
+      out.push(...build({ x: rect.x, y: rect.y + r.nestedH + (r.nestedH > 0 ? gapY : 0), width: r.nestedW, height: r.topH }, depth + 1))
+    }
+    return out
+  }
+
+  return { build }
 }
+
+const packRect = (rect: Rect, bounds: Rect, gapX: number, gapY: number, allowed: readonly (0 | 90)[]): ImposePlacement[] =>
+  createPacker(bounds, gapX, gapY, allowed).build(rect, 0)
 
 const planSheet = (
   bounds: Rect,
@@ -279,7 +325,7 @@ const planSheet = (
   const alt0 = candidateOf(bounds, 0, usable, gapX, gapY)
   const alt90 = candidateOf(bounds, 90, usable, gapX, gapY)
   const allowed: readonly (0 | 90)[] = rotation === 0 ? [0] : rotation === 90 ? [90] : [0, 90]
-  const placements = packRect(usable, bounds, gapX, gapY, allowed, 0)
+  const placements = packRect(usable, bounds, gapX, gapY, allowed)
   const primaryRot = placements[0]?.rotation ?? (rotation === 90 ? 90 : 0)
   const primaryPlaced = placements.filter((p) => p.rotation === primaryRot)
   const xs = [...new Set(primaryPlaced.map((p) => round(p.x, 3)))].sort((a, b) => a - b)
@@ -419,6 +465,9 @@ export function dielineFromPayload(raw: unknown): Dieline {
  * Tek bir bıçak izini tabakaya dizer.
  * Otomatikte 0°/90° ızgaranın yanı sıra kalan şeride diğer yönü de ekler.
  */
+/** Tek tabakadaki en fazla adet (alan tahmini). */
+export const MAX_SHEET_PIECES = 4000
+
 export function imposeDieline(source: Dieline, requested: ImposeOptions): ImposeResult {
   const options = fitSheetOptions(source.bounds, requested)
   const sheetAdjusted =
@@ -431,6 +480,10 @@ export function imposeDieline(source: Dieline, requested: ImposeOptions): Impose
   }
 
   const bounds = source.bounds
+  // Çok küçük bir kalıp dev tabakaya binlerce kez dizilirse çıktı (SVG/PDF) devleşir.
+  if ((usable.width * usable.height) / Math.max(bounds.width * bounds.height, 1e-6) > MAX_SHEET_PIECES) {
+    throw new ImposeError('impose_too_many', `Bir tabakaya en fazla ${MAX_SHEET_PIECES} adet dizilebilir`)
+  }
   const alt0 = candidateOf(bounds, 0, usable, options.gapX, options.gapY)
   const alt90 = candidateOf(bounds, 90, usable, options.gapX, options.gapY)
   const planned = planSheet(bounds, usable, options.gapX, options.gapY, options.rotation)

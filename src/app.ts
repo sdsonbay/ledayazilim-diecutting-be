@@ -17,7 +17,10 @@ import { toDxf, toPdf, toSvg } from '@diecut/exporters'
 import { ImportError, importDieline } from '@diecut/importers'
 import { imposeDieline, ImposeError, parseImposeOptions, dielineFromPayload, SHEET_PRESETS, type Dieline } from '@diecut/core'
 import { type Context, Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { cors } from 'hono/cors'
+import { secureHeaders } from 'hono/secure-headers'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import {
   AuthError,
   bearerToken,
@@ -52,6 +55,7 @@ import {
   type DesignRow,
 } from './db.ts'
 import { localizeError, requestLocale, type Locale } from './errors.ts'
+import { clientIp, limiters, type RateLimiter } from './rateLimit.ts'
 
 type Variables = { userId: string | null; guestId: string | null }
 
@@ -72,6 +76,31 @@ app.use(
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     exposeHeaders: ['Content-Disposition', 'X-Diecut-Credits'],
   }),
+)
+
+// API yanıtları için temel güvenlik başlıkları. Önizleme SVG'leri web'den <img> ile
+// yüklendiği için kaynaklar arası kaynak politikası kapalı.
+app.use(
+  '*',
+  secureHeaders({
+    crossOriginResourcePolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] },
+  }),
+)
+
+/** Gövde boyutu sınırı: büyük istekler belleğe alınmadan reddedilir. */
+const BODY_LIMITS: [prefix: string, bytes: number][] = [
+  ['/api/v1/dielines/import', 9 * 1024 * 1024],
+  ['/api/v1/designs', 6 * 1024 * 1024],
+]
+const DEFAULT_BODY_LIMIT = 4 * 1024 * 1024
+app.use('/api/*', (c, next) =>
+  bodyLimit({
+    maxSize: BODY_LIMITS.find(([prefix]) => c.req.path.startsWith(prefix))?.[1] ?? DEFAULT_BODY_LIMIT,
+    onError: (ctx) => jsonError(ctx, 'payload_too_large', 413),
+  })(c, next),
 )
 
 app.use('*', async (c, next) => {
@@ -118,6 +147,8 @@ app.get('/api/v1/session', async (c) => {
 })
 
 app.post('/api/v1/auth/register', async (c) => {
+  const blocked = rateLimited(c, limiters.auth, clientIp(c))
+  if (blocked) return blocked
   try {
     const body = await c.req.json<{ email?: string; password?: string; name?: string }>()
     const email = body.email ?? ''
@@ -137,12 +168,18 @@ app.post('/api/v1/auth/register', async (c) => {
 })
 
 app.post('/api/v1/auth/login', async (c) => {
+  const blocked = rateLimited(c, limiters.auth, clientIp(c))
+  if (blocked) return blocked
   try {
     const body = await c.req.json<{ email?: string; password?: string }>()
     const email = body.email ?? ''
     const password = body.password ?? ''
     validateCredentials(email, password)
+    const emailKey = email.trim().toLowerCase()
+    const tooMany = rateLimited(c, limiters.loginEmail, emailKey)
+    if (tooMany) return tooMany
     const user = await loginUser(email, password)
+    limiters.loginEmail.reset(emailKey)
     const token = await signAccessToken({ id: user.id, email: user.email ?? email })
     return c.json({
       token,
@@ -245,6 +282,8 @@ app.get('/api/v1/templates/:id', (c) => {
 app.get('/api/v1/catalog/dct-coverage', (c) => c.json(dctCoverage()))
 
 app.post('/api/v1/dielines', async (c) => {
+  const blocked = rateLimited(c, limiters.generate, clientIp(c))
+  if (blocked) return blocked
   try {
     const body = await c.req.json<{
       templateId?: string
@@ -271,6 +310,8 @@ app.post('/api/v1/dielines', async (c) => {
 })
 
 app.post('/api/v1/dielines/impose', async (c) => {
+  const blocked = rateLimited(c, limiters.heavy, clientIp(c))
+  if (blocked) return blocked
   try {
     const body = await c.req.json<{
       templateId?: string
@@ -304,6 +345,8 @@ app.post('/api/v1/dielines/impose', async (c) => {
 })
 
 app.post('/api/v1/dielines/import', async (c) => {
+  const blocked = rateLimited(c, limiters.heavy, clientIp(c))
+  if (blocked) return blocked
   try {
     const form = await c.req.formData()
     const file = form.get('file')
@@ -332,14 +375,19 @@ app.post('/api/v1/dielines/export', async (c) => {
     if (!userId && !guestId) {
       return jsonError(c, 'session_required', 400)
     }
+    if (!['pdf', 'svg', 'dxf'].includes(format)) return jsonError(c, 'format_invalid')
+    const ip = clientIp(c)
+    const blocked = rateLimited(c, limiters.heavy, ip) ?? (userId ? null : rateLimited(c, limiters.guestExport, ip))
+    if (blocked) return blocked
+    // Önce çizim: geçersiz parametre ya da tabaka hatasında kredi düşmesin.
+    const source = resolveDielineSource(body)
+    const imposed = body.impose ? imposeDieline(source, parseImposeOptions(body.impose)) : null
     if (!userId && guestId) await ensureGuest(guestId)
     const spent = await consumeCredit({
       userId: userId ?? undefined,
       guestId: userId ? undefined : guestId ?? undefined,
       reason: `export:${format}`,
     })
-    const source = resolveDielineSource(body)
-    const imposed = body.impose ? imposeDieline(source, parseImposeOptions(body.impose)) : null
     const dieline = imposed?.dieline ?? source
     const stamp = imposed
       ? `${source.templateId}-${imposed.layout.cols}x${imposed.layout.rows}-${Math.round(imposed.layout.sheet.width)}x${Math.round(imposed.layout.sheet.height)}`
@@ -400,11 +448,15 @@ app.get('/api/v1/me', async (c) => {
   }
 })
 
-app.get('/api/v1/credits/packages', (c) => c.json({ items: CREDIT_PACKAGES, provider: 'mock' }))
+app.get('/api/v1/credits/packages', (c) =>
+  c.json({ items: CREDIT_PACKAGES, provider: config.mockPayments ? 'mock' : 'none' }),
+)
 
 app.post('/api/v1/credits/purchase', async (c) => {
   try {
     const userId = requireUser(c)
+    // Gerçek ödeme (PayTR) bağlanana kadar deneme satın alımı yalnız açıkça izin verilen ortamlarda.
+    if (!config.mockPayments) return jsonError(c, 'payments_unavailable', 503)
     const body = await c.req.json<{ packageId?: string }>().catch(() => ({ packageId: '' }))
     const result = await addCredits(userId, String(body.packageId ?? ''))
     return c.json({
@@ -533,6 +585,7 @@ app.get('/api/v1/designs/:id/artwork', async (c) => {
     return new Response(Buffer.from(art.bytes), {
       headers: {
         'content-type': art.mime,
+        'content-disposition': 'inline; filename="artwork"',
         'cache-control': 'private, max-age=120',
       },
     })
@@ -563,7 +616,15 @@ function localeOf(c: Context): Locale {
 
 function jsonError(c: Context, code: string, status?: number, extra?: Record<string, unknown>): Response {
   const locale = localeOf(c)
-  return c.json({ error: localizeError(code, locale), code, ...extra }, (status ?? 400) as 400 | 401 | 404)
+  return c.json({ error: localizeError(code, locale), code, ...extra }, (status ?? 400) as ContentfulStatusCode)
+}
+
+/** Sınır aşıldıysa 429 yanıtı, değilse null. */
+function rateLimited(c: Context, limiter: RateLimiter, key: string): Response | null {
+  const wait = limiter.take(key)
+  if (!wait) return null
+  c.header('Retry-After', String(wait))
+  return jsonError(c, 'rate_limited', 429, { retryAfter: wait })
 }
 
 function requireUser(c: Context): string {
@@ -604,14 +665,20 @@ function parsePrintTransform(raw: Record<string, unknown>): {
   offsetX: number
   offsetY: number
   rotation: number
+  aspect?: number
 } {
   const num = (value: unknown, fallback: number) =>
     typeof value === 'number' && Number.isFinite(value) ? value : fallback
+  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+  const rotation = ((((num(raw.rotation, 0) + 180) % 360) + 360) % 360) - 180
+  const aspect = num(raw.aspect, Number.NaN)
   return {
-    scale: Math.min(2.5, Math.max(0.4, num(raw.scale, 1))),
-    offsetX: num(raw.offsetX, 0),
-    offsetY: num(raw.offsetY, 0),
-    rotation: num(raw.rotation, 0),
+    scale: clamp(num(raw.scale, 1), 0.05, 8),
+    offsetX: clamp(num(raw.offsetX, 0), -10_000, 10_000),
+    offsetY: clamp(num(raw.offsetY, 0), -10_000, 10_000),
+    rotation,
+    // Görsel en/boy oranı (yoksa eski davranış: bıçak izine gerilir).
+    ...(aspect > 0 ? { aspect: clamp(aspect, 0.01, 100) } : {}),
   }
 }
 
@@ -625,14 +692,15 @@ function parseFinishSettings(raw: Record<string, unknown>): {
     const n = typeof value === 'number' && Number.isFinite(value) ? value : fallback
     return Math.min(max, Math.max(min, n))
   }
-  const str = (value: unknown, fallback: string) => (typeof value === 'string' && value ? value : fallback)
+  const hex = (value: unknown, fallback: string) =>
+    typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback
   const foilRaw = raw.foil && typeof raw.foil === 'object' ? (raw.foil as Record<string, unknown>) : {}
   const embossRaw = raw.emboss && typeof raw.emboss === 'object' ? (raw.emboss as Record<string, unknown>) : {}
   const varnishRaw = raw.varnish && typeof raw.varnish === 'object' ? (raw.varnish as Record<string, unknown>) : {}
   return {
     foil: {
       enabled: bool(foilRaw.enabled),
-      color: str(foilRaw.color, '#c9a227'),
+      color: hex(foilRaw.color, '#c9a227'),
       intensity: num(foilRaw.intensity, 0.85, 0, 1),
     },
     emboss: {
@@ -651,9 +719,24 @@ async function readArtwork(
 ): Promise<{ bytes: Uint8Array; mime: string } | undefined> {
   if (!(value instanceof File) || value.size === 0) return undefined
   if (value.size > ARTWORK_MAX) throw new AuthError('Baskı görseli 4 MB üstü olamaz', 400, 'artwork_too_large')
-  const mime = value.type === 'image/jpg' ? 'image/jpeg' : value.type
-  if (!ARTWORK_TYPES.has(mime)) throw new AuthError('Baskı görseli PNG, JPG veya WebP olmalı', 400, 'artwork_type')
-  return { bytes: new Uint8Array(await value.arrayBuffer()), mime }
+  const bytes = new Uint8Array(await value.arrayBuffer())
+  // İstemcinin bildirdiği türe değil dosyanın imzasına bakılır (ör. image/png diye gönderilmiş HTML).
+  const mime = sniffImage(bytes)
+  if (!mime || !ARTWORK_TYPES.has(mime)) throw new AuthError('Baskı görseli PNG, JPG veya WebP olmalı', 400, 'artwork_type')
+  return { bytes, mime }
+}
+
+function sniffImage(b: Uint8Array): string | null {
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png'
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg'
+  if (
+    b.length >= 12 &&
+    String.fromCharCode(b[0]!, b[1]!, b[2]!, b[3]!) === 'RIFF' &&
+    String.fromCharCode(b[8]!, b[9]!, b[10]!, b[11]!) === 'WEBP'
+  ) {
+    return 'image/webp'
+  }
+  return null
 }
 
 function designJson(row: DesignRow) {
@@ -728,6 +811,10 @@ function handleError(c: Context, error: unknown): Response {
   if (error instanceof ImposeError) {
     return c.json({ error: localizeError(error.code, locale, error.message), code: error.code }, 400)
   }
-  const message = error instanceof Error ? error.message : localizeError('unexpected', locale)
-  return c.json({ error: message, code: 'unexpected' }, 400)
+  if (error instanceof SyntaxError) {
+    return c.json({ error: localizeError('invalid_json', locale), code: 'invalid_json' }, 400)
+  }
+  // İç hata ayrıntıları (SQL, yığın) istemciye sızmasın; yalnız loglanır.
+  console.error('[api] unexpected error', c.req.method, c.req.path, error)
+  return c.json({ error: localizeError('unexpected', locale), code: 'unexpected' }, 500)
 }

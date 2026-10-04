@@ -1,4 +1,5 @@
 import { inflateSync } from 'node:zlib'
+import { Buffer } from 'node:buffer'
 import type { Point } from '@diecut/core'
 import { layerFromName, isGuideLayer, buildColorLayerMap, resolveLayer, type ImportLayer, type LayerHint } from './color-layer.ts'
 import { parseRaster } from './parse-raster.ts'
@@ -12,15 +13,15 @@ interface PdfObject {
   stream: Uint8Array | null
 }
 
-const latin1 = (bytes: Uint8Array): string => {
-  let s = ''
-  for (let i = 0; i < bytes.length; i += 1) s += String.fromCharCode(bytes[i] ?? 0)
-  return s
-}
+const latin1 = (bytes: Uint8Array): string => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('latin1')
+
+const MAX_STREAM_BYTES = 32 * 1024 * 1024
+const MAX_TOTAL_INFLATED = 96 * 1024 * 1024
 
 const extractObjects = (bytes: Uint8Array): PdfObject[] => {
   const text = latin1(bytes)
   const out: PdfObject[] = []
+  let budget = MAX_TOTAL_INFLATED
   const re = /(\d+)\s+0\s+obj\b/g
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
@@ -43,8 +44,14 @@ const extractObjects = (bytes: Uint8Array): PdfObject[] => {
     const filtered = /\/Filter\s*\/FlateDecode/.test(dict) || /\/Filter\s*\[\s*\/FlateDecode/.test(dict)
     if (filtered) {
       try {
-        out.push({ id, dict, stream: inflateSync(streamBytes) })
-      } catch {
+        // Sıkıştırma bombasına karşı: tek akış en fazla 32 MB, toplam en fazla 96 MB açılır.
+        const stream = inflateSync(streamBytes, { maxOutputLength: Math.min(MAX_STREAM_BYTES, Math.max(1, budget)) })
+        budget -= stream.length
+        out.push({ id, dict, stream })
+      } catch (error) {
+        if (budget <= 0 || (error as { code?: string }).code === 'ERR_BUFFER_TOO_LARGE') {
+          throw new ImportError('PDF içeriği çok büyük', 'import_too_large')
+        }
         out.push({ id, dict, stream: streamBytes })
       }
     } else {

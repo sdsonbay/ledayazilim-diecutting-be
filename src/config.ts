@@ -16,6 +16,8 @@ export const config = {
     .filter(Boolean),
   guestCredits: Number(process.env.GUEST_CREDITS ?? 3),
   signupCredits: Number(process.env.SIGNUP_CREDITS ?? 15),
+  /** Deneme satın alımı (gerçek ödeme yok). Yalnız local/dev'de varsayılan açık. */
+  mockPayments: (process.env.MOCK_PAYMENTS ?? (['local', 'dev', 'development'].includes(process.env.APP_ENV ?? 'local') ? 'true' : 'false')) === 'true',
   tokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL ?? 60 * 60 * 24 * 7),
 }
 

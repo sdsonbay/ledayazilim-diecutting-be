@@ -37,6 +37,9 @@ export const isWebp = (bytes: Uint8Array): boolean => {
   return tag.startsWith('RIFF') && tag.endsWith('WEBP')
 }
 
+/** Çözülecek en büyük görsel (RGBA ≈ 100 MB). */
+const MAX_PIXELS = 25_000_000
+
 export const decodeRaster = (bytes: Uint8Array, filename: string): RasterPixels => {
   const name = filename.toLowerCase()
   if (isWebp(bytes) || name.endsWith('.webp')) {
@@ -44,6 +47,13 @@ export const decodeRaster = (bytes: Uint8Array, filename: string): RasterPixels 
   }
   try {
     if (isPng(bytes) || name.endsWith('.png')) {
+      // Küçük dosyada dev boyut (sıkıştırma bombası): çözmeden önce IHDR'den piksel sayısına bak.
+      if (isPng(bytes) && bytes.length >= 24) {
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+        if (view.getUint32(16) * view.getUint32(20) > MAX_PIXELS) {
+          throw new ImportError('Görsel çok büyük (en fazla 25 megapiksel).', 'import_too_large')
+        }
+      }
       const png = PNG.sync.read(Buffer.from(bytes))
       let mmPerPx = 0
       if (png.phys?.unit === 1 && png.phys.x > 0) mmPerPx = 1000 / png.phys.x

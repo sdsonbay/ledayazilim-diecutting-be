@@ -41,6 +41,7 @@ export const errorCatalog = {
   api_key_revoked: { status: 401, tr: 'Bu API anahtarı iptal edilmiş', en: 'This API key has been revoked' },
   template_not_found: { status: 404, tr: 'Bilinmeyen şablon', en: 'Unknown template' },
   param: { status: 400, tr: 'Parametre geçersiz', en: 'Invalid parameter' },
+  import_too_large: { status: 400, tr: 'Dosyanın içeriği çok büyük', en: 'The file content is too large' },
   import: { status: 400, tr: 'İçe aktarma başarısız', en: 'Import failed' },
   impose_invalid: { status: 400, tr: 'Tabaka ölçüleri veya kenar payları geçersiz', en: 'Sheet size or margins are invalid' },
   impose_does_not_fit: {
@@ -48,6 +49,20 @@ export const errorCatalog = {
     tr: 'Bu bıçak izi seçilen tabakaya sığmıyor',
     en: 'This blank does not fit the selected sheet',
   },
+  impose_too_many: {
+    status: 400,
+    tr: 'Bu tabakaya çok fazla adet düşüyor; daha küçük bir tabaka seç',
+    en: 'Too many copies for this sheet; pick a smaller sheet',
+  },
+  rate_limited: { status: 429, tr: 'Çok fazla istek. Biraz bekleyip tekrar dene.', en: 'Too many requests. Please wait a moment and try again.' },
+  payload_too_large: { status: 413, tr: 'İstek çok büyük', en: 'Request is too large' },
+  invalid_json: { status: 400, tr: 'İstek gövdesi geçerli JSON değil', en: 'Request body is not valid JSON' },
+  payments_unavailable: {
+    status: 503,
+    tr: 'Kredi satın alma şu an kapalı. Yakında açılacak.',
+    en: 'Buying credits is not available yet.',
+  },
+  password_too_long: { status: 400, tr: 'Şifre en fazla 200 karakter olabilir', en: 'Password must be at most 200 characters' },
   unexpected: { status: 400, tr: 'Beklenmeyen hata', en: 'Unexpected error' },
   request_failed: { status: 400, tr: 'İstek başarısız', en: 'Request failed' },
 } as const
