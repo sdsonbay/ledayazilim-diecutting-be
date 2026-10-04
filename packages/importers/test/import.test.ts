@@ -221,7 +221,7 @@ test('yazı plakası PDF: tüm paneller katlama ağacına bağlanır', () => {
     .filter(Boolean)
   assert.equal(leftFlapChildren.length, 2, 'sol duvar üst + alt kanat')
   for (const flap of leftFlapChildren) {
-    assert.equal(flap!.role, 'flap')
+    assert.ok(['flap', 'dust', 'lid'].includes(flap!.role), `${flap!.id} rolü ${flap!.role}`)
     const ys = flap!.outline.map((q) => q.y)
     assert.ok(Math.min(...ys) < 55 || Math.max(...ys) > 130, `${flap!.id} üst veya alt kanat olmalı`)
   }

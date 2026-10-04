@@ -6,6 +6,8 @@ import {
   generateDieline,
   getTemplate,
   countTemplates,
+  recognizeDieline,
+  type TemplateMatch,
   queryCatalog,
   resolveCatalog,
   toSummary,
@@ -354,7 +356,7 @@ app.post('/api/v1/dielines/import', async (c) => {
     if (file.size > 8 * 1024 * 1024) return jsonError(c, 'file_too_large')
     const bytes = new Uint8Array(await file.arrayBuffer())
     const dieline = importDieline(bytes, file.name || 'import.svg')
-    return c.json(dielineJson(dieline, undefined, localeOf(c)))
+    return c.json({ ...dielineJson(dieline, undefined, localeOf(c)), match: matchFor(dieline) })
   } catch (error) {
     return handleError(c, error)
   }
@@ -609,6 +611,29 @@ app.delete('/api/v1/designs/:id', async (c) => {
 
 const ARTWORK_MAX = 4 * 1024 * 1024
 const ARTWORK_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+
+/**
+ * İçe aktarılan bıçak izi bir şablona karşılık geliyorsa (kendi dışa aktarımımız veya
+ * tanıma), parametrik editörde açılabilmesi için şablon ve ölçüler.
+ */
+function matchFor(dieline: Dieline): TemplateMatch | null {
+  if (dieline.templateId && dieline.templateId !== 'imported') {
+    try {
+      const def = getTemplate(dieline.templateId)
+      const keys = new Set(def.params.map((p) => p.key))
+      const variables = Object.fromEntries(Object.entries(dieline.params ?? {}).filter(([k]) => keys.has(k))) as TemplateMatch['variables']
+      return { templateId: def.id, variables, deviation: 0, coverage: 1, exact: true }
+    } catch {
+      /* bilinmeyen şablon: tanımaya düş */
+    }
+  }
+  try {
+    return recognizeDieline(dieline, 4000)
+  } catch (error) {
+    console.error('[api] recognition failed', error)
+    return null
+  }
+}
 
 function localeOf(c: Context): Locale {
   return requestLocale(c.req.header('Accept-Language'))

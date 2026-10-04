@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server'
+import { warmRecognition } from '@diecut/templates'
 import { app } from './app.ts'
 import { config } from './config.ts'
 import { migrate } from './db.ts'
@@ -11,6 +12,8 @@ await migrate()
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`diecutting api [${config.env}] listening on :${info.port}`)
+  // Şablon tanıma modelleri arka planda (istekleri bloklamadan) hazırlanır.
+  void warmRecognition().then(() => console.log('template recognition ready'))
 })
 
 const shutdown = () => {

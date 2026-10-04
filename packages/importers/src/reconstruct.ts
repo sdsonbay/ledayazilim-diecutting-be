@@ -1,11 +1,11 @@
 import {
   DielineBuilder,
-  centroid,
   distance,
   pointInPolygon,
   polygonArea,
   signedArea,
   type Dieline,
+  type PanelRole,
   type PathCommand,
   type Point,
 } from '@diecut/core'
@@ -206,344 +206,413 @@ export const reconstruct = (paths: ImportedPath[], filename: string): Dieline =>
   bridgeEndpointGaps(raw, endpointKeys)
   const segs = splitSegments(raw, verts)
 
-  let boundsMinX = Infinity
-  let boundsMinY = Infinity
-  let boundsMaxX = -Infinity
-  let boundsMaxY = -Infinity
-  for (const path of paths) {
-    for (const p of path.points) {
-      boundsMinX = Math.min(boundsMinX, p.x)
-      boundsMinY = Math.min(boundsMinY, p.y)
-      boundsMaxX = Math.max(boundsMaxX, p.x)
-      boundsMaxY = Math.max(boundsMaxY, p.y)
-    }
-  }
-  const layoutArea = Math.max((boundsMaxX - boundsMinX) * (boundsMaxY - boundsMinY), 1)
-  /** Dış (sonsuz) yüz — tablonun ~%65'inden büyük, kırımsız siluet. */
-  const isOuterContainerFace = (outline: Point[]): boolean =>
-    polygonArea(outline) > layoutArea * 0.65
+  return buildFromSegments(segs, paths, filename)
+}
 
-  const adj = new Map<string, { to: Vertex; crease: boolean }[]>()
-  const byKey = new Map<string, Vertex>()
+// ---------------------------------------------------------------------------
+// Düzlemsel bölünme (yarım kenar) → paneller, kırımlar, katlama ağacı
+// ---------------------------------------------------------------------------
+
+interface HalfEdge {
+  from: Vertex
+  to: Vertex
+  crease: boolean
+  twin: number
+  next: number
+  face: number
+  angle: number
+}
+
+interface Face {
+  /** Saat yönünün tersine dolaşılan sınır (sınırlı yüzlerde alan > 0). */
+  outline: Point[]
+  area: number
+  edges: number[]
+}
+
+/** Kesim çizgisini geçen bölge malzeme ↔ boşluk değiştirir; kırım çizgisini geçen değiştirmez. */
+const buildFromSegments = (segs: Seg[], paths: ImportedPath[], filename: string): Dieline => {
+  const he: HalfEdge[] = []
+  const out = new Map<string, number[]>()
   for (const seg of segs) {
-    byKey.set(seg.a.key, seg.a)
-    byKey.set(seg.b.key, seg.b)
-    const add = (from: Vertex, to: Vertex, crease: boolean) => {
-      const list = adj.get(from.key) ?? []
-      if (!list.some((n) => n.to.key === to.key)) list.push({ to, crease })
-      adj.set(from.key, list)
+    const i = he.length
+    he.push({ from: seg.a, to: seg.b, crease: seg.crease, twin: i + 1, next: -1, face: -1, angle: Math.atan2(seg.b.y - seg.a.y, seg.b.x - seg.a.x) })
+    he.push({ from: seg.b, to: seg.a, crease: seg.crease, twin: i, next: -1, face: -1, angle: Math.atan2(seg.a.y - seg.b.y, seg.a.x - seg.b.x) })
+    for (const k of [i, i + 1]) {
+      const list = out.get(he[k]!.from.key) ?? []
+      list.push(k)
+      out.set(he[k]!.from.key, list)
     }
-    add(seg.a, seg.b, seg.crease)
-    add(seg.b, seg.a, seg.crease)
+  }
+  for (const list of out.values()) list.sort((a, b) => he[a]!.angle - he[b]!.angle)
+  // Sonraki kenar: varılan köşede, gelinen kenarın ikizinden saat yönünde bir önceki çıkış.
+  for (let i = 0; i < he.length; i += 1) {
+    const e = he[i]!
+    const list = out.get(e.to.key)!
+    const idx = list.indexOf(e.twin)
+    e.next = list[(idx - 1 + list.length) % list.length]!
   }
 
-  const faceSignatures = new Set<string>()
-  const faces: { outline: Point[]; creaseKeys: Set<string> }[] = []
-
-  const dirKey = (a: string, b: string) => `${a}>${b}`
-
-  const faceSignature = (outline: Point[]): string => {
-    const edges: string[] = []
-    for (let i = 0; i < outline.length; i += 1) {
-      const p = outline[i] as Point
-      const q = outline[(i + 1) % outline.length] as Point
-      const a = keyOf(p.x, p.y)
-      const b = keyOf(q.x, q.y)
-      edges.push(a < b ? `${a}|${b}` : `${b}|${a}`)
+  const faces: Face[] = []
+  for (let i = 0; i < he.length; i += 1) {
+    if (he[i]!.face >= 0) continue
+    const id = faces.length
+    const edges: number[] = []
+    const outline: Point[] = []
+    let k = i
+    let guard = 0
+    while (he[k]!.face < 0 && guard < 200_000) {
+      he[k]!.face = id
+      edges.push(k)
+      outline.push({ x: he[k]!.from.x, y: he[k]!.from.y })
+      k = he[k]!.next
+      guard += 1
     }
-    edges.sort()
-    return edges.join(';')
+    faces.push({ outline, area: signedArea(outline), edges })
   }
 
-  const nextVertex = (prev: Vertex, cur: Vertex): Vertex | null => {
-    const nbrs = adj.get(cur.key)
-    if (!nbrs || nbrs.length === 0) return null
-    const ranked = nbrs
-      .map((n) => ({ n, angle: Math.atan2(n.to.y - cur.y, n.to.x - cur.x) }))
-      .sort((a, b) => a.angle - b.angle)
-    const idx = ranked.findIndex((r) => r.n.to.key === prev.key)
-    if (idx < 0) return ranked[0]?.n.to ?? null
-    const n = ranked.length
-    return ranked[(idx - 1 + n) % n]?.n.to ?? null
-  }
-
-  for (const [fromKey, nbrs] of adj) {
-    const from = byKey.get(fromKey)
-    if (!from) continue
-    for (const n of nbrs) {
-      const outline: Point[] = []
-      const creaseKeys = new Set<string>()
-      let prev = from
-      let cur = n.to
-      let guard = 0
-      const stepSeen = new Set<string>([dirKey(from.key, n.to.key)])
-      outline.push({ x: from.x, y: from.y })
-      while (guard < 4000) {
-        guard += 1
-        outline.push({ x: cur.x, y: cur.y })
-        const edge = segs.find(
-          (s) => (s.a.key === prev.key && s.b.key === cur.key) || (s.a.key === cur.key && s.b.key === prev.key),
-        )
-        if (edge?.crease) {
-          const ck = prev.key < cur.key ? `${prev.key}|${cur.key}` : `${cur.key}|${prev.key}`
-          creaseKeys.add(ck)
+  // Bağlı bileşenler: içteki bir bileşenin (ör. ayrı çizilmiş delik) dış yüzü,
+  // onu çevreleyen yüzle aynı bölgedir.
+  const comp = new Map<string, number>()
+  let compCount = 0
+  for (const key of out.keys()) {
+    if (comp.has(key)) continue
+    const stack = [key]
+    comp.set(key, compCount)
+    while (stack.length) {
+      const v = stack.pop()!
+      for (const k of out.get(v) ?? []) {
+        const w = he[k]!.to.key
+        if (!comp.has(w)) {
+          comp.set(w, compCount)
+          stack.push(w)
         }
-        const nxt = nextVertex(prev, cur)
-        if (!nxt) break
-        const stepKey = dirKey(cur.key, nxt.key)
-        if (stepSeen.has(stepKey) && nxt.key !== from.key) break
-        if (stepSeen.has(stepKey) && nxt.key === from.key && outline.length >= 3) {
-          cur = from
-          break
-        }
-        stepSeen.add(stepKey)
-        prev = cur
-        cur = nxt
-        if (cur.key === from.key && outline.length >= 3) break
       }
-      if (outline.length < 3 || cur.key !== from.key) continue
-      if (outline[outline.length - 1] && keyOf(outline[outline.length - 1].x, outline[outline.length - 1].y) === from.key) {
-        outline.pop()
-      }
-      if (isOuterContainerFace(outline)) continue
-      if (Math.abs(signedArea(outline)) <= MIN_FACE_AREA) continue
-      const sig = faceSignature(outline)
-      if (faceSignatures.has(sig)) continue
-      faceSignatures.add(sig)
-      faces.push({ outline, creaseKeys })
     }
+    compCount += 1
   }
-
-  const contains = (outer: Point[], inner: Point[]): boolean => {
-    if (polygonArea(inner) >= polygonArea(outer) * 0.9) return false
-    const c = centroid(inner)
-    if (!pointInPolygon(c, outer)) return false
-    let inside = 0
-    for (const p of inner) if (pointInPolygon(p, outer)) inside += 1
-    return inside >= inner.length * 0.65
-  }
-
-  const candidates = faces.filter((face) => {
-    const area = polygonArea(face.outline)
-    if (face.creaseKeys.size > 0) return area >= MIN_FACE_AREA
-    return area >= 900
+  const faceComp = faces.map((f) => comp.get(he[f.edges[0]!]!.from.key) ?? 0)
+  const parentFace = faces.map(() => -1)
+  const holesOf = new Map<number, number[]>()
+  faces.forEach((f, i) => {
+    if (f.area > 0) return
+    // Bileşenin dış sınırı: onu içeren en küçük, başka bileşene ait sınırlı yüz.
+    const probe = f.outline[0]!
+    let best = -1
+    let bestArea = Infinity
+    faces.forEach((g, j) => {
+      if (g.area <= 0 || faceComp[j] === faceComp[i] || g.area >= bestArea) return
+      if (pointInPolygon(probe, g.outline)) {
+        best = j
+        bestArea = g.area
+      }
+    })
+    parentFace[i] = best
+    if (best >= 0) holesOf.set(best, [...(holesOf.get(best) ?? []), i])
   })
+  // Bölge kimliği: dış yüzler çevreleyen yüzle birleşir.
+  const region = faces.map((_, i) => i)
+  const root = (i: number): number => (parentFace[i]! >= 0 && faces[i]!.area <= 0 ? root(parentFace[i]!) : region[i]!)
 
-  const panels = candidates.filter(
-    (face) =>
-      !(
-        face.creaseKeys.size === 0 &&
-        candidates.some((other) => other !== face && contains(other.outline, face.outline))
-      ),
-  )
+  // Malzeme / boşluk: en dıştaki yüzlerden başla, kesimde değiştir, kırımda koru.
+  const material = new Map<number, boolean>()
+  const queue: number[] = []
+  faces.forEach((f, i) => {
+    if (f.area <= 0 && parentFace[i] === -1) {
+      material.set(i, false)
+      queue.push(i)
+    }
+  })
+  const neighbours = (r: number): { other: number; crease: boolean }[] => {
+    const list: { other: number; crease: boolean }[] = []
+    const members = faces.map((_, i) => i).filter((i) => root(i) === r)
+    for (const m of members) {
+      for (const k of faces[m]!.edges) {
+        const other = root(he[he[k]!.twin]!.face)
+        if (other !== r) list.push({ other, crease: he[k]!.crease })
+      }
+    }
+    return list
+  }
+  const neighbourCache = new Map<number, { other: number; crease: boolean }[]>()
+  // Dış boşluğa komşu her bölge malzemedir (dış hatta kesim yerine kırım çizilmiş olsa bile).
+  const outer = [...queue]
+  queue.length = 0
+  for (const r of outer) {
+    const list = neighbours(r)
+    neighbourCache.set(r, list)
+    for (const { other } of list) {
+      if (material.has(other)) continue
+      material.set(other, true)
+      queue.push(other)
+    }
+  }
+  while (queue.length) {
+    const r = queue.shift()!
+    const mat = material.get(r)!
+    const list = neighbourCache.get(r) ?? neighbours(r)
+    neighbourCache.set(r, list)
+    for (const { other, crease } of list) {
+      if (material.has(other)) continue
+      material.set(other, crease ? mat : !mat)
+      queue.push(other)
+    }
+  }
 
-  if (panels.length === 0) {
+  const hasCrease = (i: number) => faces[i]!.edges.some((k) => he[k]!.crease && root(he[he[k]!.twin]!.face) !== i)
+  const panelFaces = faces
+    .map((f, i) => ({ f, i }))
+    .filter(({ f, i }) => f.area >= MIN_FACE_AREA && root(i) === i && material.get(i) === true)
+    // Kırımsız küçük parça (ör. kenardan taşan oyuk dikdörtgeninin dış yarısı) hurdadır.
+    .filter(({ f, i }) => hasCrease(i) || f.area >= 900)
+  if (panelFaces.length === 0) {
     throw new ImportError('Kapalı panel bulunamadı. Kesim dış hat ve kırım çizgileri ayrı katmanda olmalı.')
   }
 
-  const builder = new DielineBuilder(
-    'imported',
-    { name: { tr: filename, en: filename }, caliper: 0.4 },
-    { source: filename },
-  )
-
+  const builder = new DielineBuilder('imported', { name: { tr: filename, en: filename }, caliper: 0.4 }, { source: filename })
   for (const path of paths) {
-    const cmds: PathCommand[] = path.points.map((p, i) =>
-      i === 0 ? { c: 'M', x: p.x, y: p.y } : { c: 'L', x: p.x, y: p.y },
-    )
+    const cmds: PathCommand[] = path.points.map((p, i) => (i === 0 ? { c: 'M', x: p.x, y: p.y } : { c: 'L', x: p.x, y: p.y }))
     builder.addPath(path.layer, cmds)
   }
 
-  const ranked = [...panels].sort((a, b) => polygonArea(b.outline) - polygonArea(a.outline))
-  const holesFor: Point[][][] = ranked.map(() => [])
-  const pushHole = (parent: number, outline: Point[]) => {
-    const c = centroid(outline)
-    const exists = holesFor[parent]?.some((h) => {
-      const q = centroid(h)
-      return Math.hypot(q.x - c.x, q.y - c.y) < 1.5
-    })
-    if (exists) return
-    const wound = signedArea(outline) > 0 ? [...outline].reverse() : [...outline]
-    holesFor[parent]?.push(wound)
+  const index = new Map<number, number>()
+  panelFaces.forEach(({ i }, n) => index.set(i, n))
+  const outlineOf = (f: Face) => simplifyCollinear(f.outline)
+
+  // Kırım bağlantıları: iki farklı panel arasındaki kırım kenarları, eş doğrusal parçalar tek eksen.
+  type Link = { a: number; b: number; axis: [Point, Point]; len: number }
+  const pairSegs = new Map<string, { a: number; b: number; segs: [Point, Point][] }>()
+  for (let k = 0; k < he.length; k += 2) {
+    const e = he[k]!
+    if (!e.crease) continue
+    const fa = index.get(root(e.face))
+    const fb = index.get(root(he[e.twin]!.face))
+    if (fa === undefined || fb === undefined || fa === fb) continue
+    const [a, b] = fa < fb ? [fa, fb] : [fb, fa]
+    const key = `${a}-${b}`
+    const entry = pairSegs.get(key) ?? { a, b, segs: [] }
+    entry.segs.push([{ x: e.from.x, y: e.from.y }, { x: e.to.x, y: e.to.y }])
+    pairSegs.set(key, entry)
+  }
+  const links: Link[] = []
+  for (const { a, b, segs: list } of pairSegs.values()) {
+    const axis = mergeAxis(list)
+    const len = distance(axis[0], axis[1])
+    if (len >= MIN_CREASE_EDGE * 0.5) links.push({ a, b, axis, len })
   }
 
-  for (const face of faces) {
-    if (ranked.includes(face)) continue
-    const area = polygonArea(face.outline)
-    if (area < MIN_FACE_AREA) continue
-    let best = -1
-    let bestArea = Infinity
-    ranked.forEach((body, i) => {
-      if (body === face) return
-      if (!contains(body.outline, face.outline)) return
-      const a = polygonArea(body.outline)
-      if (a < bestArea) {
-        bestArea = a
-        best = i
-      }
-    })
-    if (best < 0) continue
-    pushHole(best, face.outline)
+  // Kök: en çok kırımı olan büyük panel (gövde); ağaç: en uzun kırımlar önce (en büyük kapsayan ağaç).
+  const degree = new Map<number, number>()
+  for (const l of links) {
+    degree.set(l.a, (degree.get(l.a) ?? 0) + l.len)
+    degree.set(l.b, (degree.get(l.b) ?? 0) + l.len)
+  }
+  const areas = panelFaces.map(({ f }) => f.area)
+  let rootIdx = 0
+  panelFaces.forEach((_, n) => {
+    const score = areas[n]! * (1 + (degree.get(n) ?? 0) / 1000)
+    const best = areas[rootIdx]! * (1 + (degree.get(rootIdx) ?? 0) / 1000)
+    if (score > best) rootIdx = n
+  })
+  const parentOf = new Map<number, { parent: number; link: Link }>()
+  const inTree = new Set([rootIdx])
+  for (;;) {
+    let pick: Link | null = null
+    for (const l of links) {
+      if (inTree.has(l.a) === inTree.has(l.b)) continue
+      if (!pick || l.len > pick.len) pick = l
+    }
+    if (!pick) break
+    const parent = inTree.has(pick.a) ? pick.a : pick.b
+    const child = parent === pick.a ? pick.b : pick.a
+    parentOf.set(child, { parent, link: pick })
+    inTree.add(child)
   }
 
-  for (const path of paths) {
-    if (path.layer !== 'cut' || path.points.length < 4) continue
-    const first = path.points[0]
-    const last = path.points[path.points.length - 1]
-    if (!first || !last) continue
-    if (Math.hypot(first.x - last.x, first.y - last.y) > 1.2) continue
-    const outline = path.points.slice(0, Math.hypot(first.x - last.x, first.y - last.y) < 0.4 ? -1 : undefined)
-    if (polygonArea(outline) < MIN_FACE_AREA) continue
-    let best = -1
-    let bestArea = Infinity
-    ranked.forEach((body, i) => {
-      if (!contains(body.outline, outline)) return
-      const a = polygonArea(body.outline)
-      if (a < bestArea) {
-        bestArea = a
-        best = i
-      }
-    })
-    if (best >= 0) pushHole(best, outline)
-  }
-
-  const ids: string[] = []
-  ranked.forEach((face, i) => {
-    const id = `p${i}`
-    ids.push(id)
-    const holes = holesFor[i] ?? []
+  const roles = assignRoles(panelFaces.map(({ f }) => outlineOf(f)), rootIdx, parentOf)
+  const ids = panelFaces.map((_, n) => `p${n}`)
+  panelFaces.forEach(({ f, i }, n) => {
+    const holes = (holesOf.get(i) ?? [])
+      .map((h) => faces[h]!.outline)
+      .filter((h) => Math.abs(signedArea(h)) >= MIN_FACE_AREA * 0.25)
+      .map((h) => (signedArea(h) > 0 ? [...h].reverse() : h))
+    const role = roles.role[n]!
     builder.panel({
-      id,
-      name: id,
-      label: { tr: i === 0 ? 'Taban' : `Panel ${i}`, en: i === 0 ? 'Base' : `Panel ${i}` },
-      outline: signedArea(face.outline) < 0 ? [...face.outline].reverse() : face.outline,
-      ...(holes.length > 0 ? { holes } : {}),
-      role: i === 0 ? 'bottom' : 'wall',
-      printable: true,
+      id: ids[n]!,
+      name: ids[n]!,
+      label: { tr: n === rootIdx ? 'Gövde' : `Panel ${n}`, en: n === rootIdx ? 'Body' : `Panel ${n}` },
+      outline: outlineOf(f),
+      ...(holes.length ? { holes } : {}),
+      role,
+      printable: role !== 'glue',
     })
   })
-
-  type Link = { a: number; b: number; axis: [Point, Point]; len: number }
-  const edgeKeyOf = (p: Point, q: Point): string => {
-    const a = keyOf(p.x, p.y)
-    const b = keyOf(q.x, q.y)
-    return a < b ? `${a}|${b}` : `${b}|${a}`
-  }
-  const edgesOf = (outline: Point[]): Map<string, [Point, Point]> => {
-    const map = new Map<string, [Point, Point]>()
-    for (let i = 0; i < outline.length; i += 1) {
-      const p = outline[i] as Point
-      const q = outline[(i + 1) % outline.length] as Point
-      map.set(edgeKeyOf(p, q), [p, q])
-    }
-    return map
-  }
-  const faceEdges = ranked.map((f) => edgesOf(f.outline))
-
-  /** Kesişimlerde bölünmüş kırım segmentleri — tam path kenarı panel sınırıyla uyuşmayabilir. */
-  const creaseEdgeKeys = new Set<string>()
-  for (const seg of segs) {
-    if (!seg.crease) continue
-    const ek = seg.a.key < seg.b.key ? `${seg.a.key}|${seg.b.key}` : `${seg.b.key}|${seg.a.key}`
-    creaseEdgeKeys.add(ek)
+  builder.root(ids[rootIdx]!)
+  // Ağaç sırasıyla (ebeveyn önce) katla.
+  const order = [...parentOf.keys()].sort((x, y) => depthOf(x, parentOf) - depthOf(y, parentOf))
+  for (const child of order) {
+    const { parent, link } = parentOf.get(child)!
+    builder.fold({ parent: ids[parent]!, child: ids[child]!, axis: link.axis, angle: roles.angle.get(child) ?? 90, draw: false })
   }
 
-  const links: Link[] = []
-  const linked = new Set<string>()
-  for (let i = 0; i < ranked.length; i += 1) {
-    for (let j = i + 1; j < ranked.length; j += 1) {
-      let best: [Point, Point] | null = null
-      let bestLen = 0
-      for (const [ek, axis] of faceEdges[i] as Map<string, [Point, Point]>) {
-        if (!(faceEdges[j] as Map<string, [Point, Point]>).has(ek)) continue
-        if (!creaseEdgeKeys.has(ek)) continue
-        const len = distance(axis[0], axis[1])
-        if (len > bestLen) {
-          bestLen = len
-          best = axis
-        }
-      }
-      if (!best || bestLen < MIN_CREASE_EDGE) continue
-      const pair = `${i}-${j}`
-      if (linked.has(pair)) continue
-      linked.add(pair)
-      links.push({ a: i, b: j, axis: best, len: bestLen })
-    }
-  }
-
-  // Kruskal-benzeri: önce uzun kırım kenarları — duvarlar kanatlardan önce bağlansın.
-  links.sort((x, y) => y.len - x.len)
-  const seen = new Set([0])
-  const linkDegree = new Map<number, number>()
-  const parentOf = new Map<number, number>()
-  while (seen.size < ranked.length) {
-    let added = false
-    for (const link of links) {
-      const aSeen = seen.has(link.a)
-      const bSeen = seen.has(link.b)
-      if (aSeen === bSeen) continue
-      const par = aSeen ? link.a : link.b
-      const child = aSeen ? link.b : link.a
-      if (seen.has(child)) continue
-      seen.add(child)
-      parentOf.set(child, par)
-      linkDegree.set(child, (linkDegree.get(child) ?? 0) + 1)
-      linkDegree.set(par, (linkDegree.get(par) ?? 0) + 1)
-      added = true
-      const childArea = polygonArea(ranked[child].outline)
-      const thin = childArea < 320 || (childArea < 500 && link.len / Math.max(Math.sqrt(childArea), 1) > 2)
-      builder.fold({
-        parent: ids[par] as string,
-        child: ids[child] as string,
-        axis: link.axis,
-        angle: thin ? 180 : 90,
-        draw: false,
-      })
-    }
-    if (!added) break
-  }
-
-  // Rolleri katlama derecesine göre güncelle (kanat / yapıştırma).
-  const panelRoles = new Map<string, { role: 'bottom' | 'wall' | 'flap' | 'glue' | 'lid'; printable: boolean }>()
-  panelRoles.set(ids[0] as string, { role: 'bottom', printable: true })
-  for (let i = 1; i < ranked.length; i += 1) {
-    const area = polygonArea(ranked[i].outline)
-    const par = parentOf.get(i) ?? -1
-    const role =
-      area < 320
-        ? 'glue'
-        : par === 0
-          ? 'wall'
-          : (linkDegree.get(i) ?? 0) <= 1 && area < 3200
-            ? 'flap'
-            : 'wall'
-    panelRoles.set(ids[i] as string, { role, printable: role !== 'glue' })
-  }
-
-  builder.root(ids[0] as string)
-  if (seen.size < ranked.length) {
+  if (inTree.size < panelFaces.length) {
     builder.warn(
       'disconnected',
       'warning',
-      `${ranked.length - seen.size} panel katlama ağacına bağlanamadı.`,
-      `${ranked.length - seen.size} panels could not be attached to the fold tree.`,
+      `${panelFaces.length - inTree.size} panel katlama ağacına bağlanamadı (ayrı parça olabilir).`,
+      `${panelFaces.length - inTree.size} panels could not be attached to the fold tree (separate pieces?).`,
     )
   }
   if (links.length === 0) {
-    builder.warn(
-      'no-folds',
-      'warning',
-      'Kırım bulunamadı; 3D düz durur. CREASE katmanı veya mavi/yeşil kırım çizgisi gerekir.',
-      'No creases found; 3D stays flat. A CREASE layer is required.',
-    )
+    builder.warn('no-folds', 'warning', 'Kırım bulunamadı; 3D düz durur. CREASE katmanı veya yeşil kırım çizgisi gerekir.', 'No creases found; 3D stays flat. A CREASE layer is required.')
   }
-  const built = builder.build()
-  for (const panel of built.panels) {
-    const role = panelRoles.get(panel.id)
-    if (role) {
-      panel.role = role.role
-      panel.printable = role.printable
+  return builder.build()
+}
+
+const depthOf = (n: number, parentOf: Map<number, { parent: number }>): number => {
+  let d = 0
+  let cur = n
+  while (parentOf.has(cur) && d < 1000) {
+    cur = parentOf.get(cur)!.parent
+    d += 1
+  }
+  return d
+}
+
+/** Eş doğrusal ardışık köşeleri ayıklar (eğriler korunur: yalnız neredeyse düz açılar). */
+const simplifyCollinear = (pts: Point[]): Point[] => {
+  const outPts: Point[] = []
+  const n = pts.length
+  for (let i = 0; i < n; i += 1) {
+    const a = pts[(i - 1 + n) % n]!
+    const b = pts[i]!
+    const c = pts[(i + 1) % n]!
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
+    const len = Math.hypot(b.x - a.x, b.y - a.y) * Math.hypot(c.x - b.x, c.y - b.y)
+    if (len > 0 && Math.abs(cross) / len < 1e-4) {
+      const dot = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)
+      if (dot > 0) continue
+    }
+    outPts.push(b)
+  }
+  return outPts.length >= 3 ? outPts : pts
+}
+
+/** Aynı panel çifti arasındaki kırım parçaları: eş doğrusalsa uçtan uca tek eksen, değilse en uzunu. */
+const mergeAxis = (list: [Point, Point][]): [Point, Point] => {
+  const longest = list.reduce((m, s) => (distance(s[0], s[1]) > distance(m[0], m[1]) ? s : m), list[0]!)
+  const [p, q] = longest
+  const len = distance(p, q)
+  const dx = (q.x - p.x) / len
+  const dy = (q.y - p.y) / len
+  const collinear = list.every((s) => s.every((v) => Math.abs((v.x - p.x) * dy - (v.y - p.y) * dx) < 0.3))
+  if (!collinear) return longest
+  let lo = 0
+  let hi = len
+  for (const s of list) {
+    for (const v of s) {
+      const t = (v.x - p.x) * dx + (v.y - p.y) * dy
+      lo = Math.min(lo, t)
+      hi = Math.max(hi, t)
     }
   }
-  return built
+  return [
+    { x: p.x + dx * lo, y: p.y + dy * lo },
+    { x: p.x + dx * hi, y: p.y + dy * hi },
+  ]
+}
+
+/** Bir panelin verilen yöne göre genişliği (izdüşüm aralığı). */
+const extentAlong = (outline: Point[], dx: number, dy: number): number => {
+  let lo = Infinity
+  let hi = -Infinity
+  for (const v of outline) {
+    const t = v.x * dx + v.y * dy
+    lo = Math.min(lo, t)
+    hi = Math.max(hi, t)
+  }
+  return hi - lo
+}
+
+/**
+ * Panel rolleri ve katlama açıları (sezgisel):
+ * - Kökten paralel kırımlarla zincirlenen eşit yükseklikte paneller gövde duvarlarıdır;
+ *   zincirde k ≥ 5 eşit duvar varsa çokgen tüp (360/k), dar uç panel yapıştırma payıdır.
+ * - Gövde dışındaki büyük kanat kapak, küçükleri toz kapağı, onların çocukları dil.
+ */
+const assignRoles = (
+  outlines: Point[][],
+  rootIdx: number,
+  parentOf: Map<number, { parent: number; link: { axis: [Point, Point]; len: number } }>,
+): { role: PanelRole[]; angle: Map<number, number> } => {
+  const n = outlines.length
+  const role: PanelRole[] = outlines.map(() => 'flap')
+  const angle = new Map<number, number>()
+  const children = new Map<number, number[]>()
+  for (const [c, { parent }] of parentOf) children.set(parent, [...(children.get(parent) ?? []), c])
+  const dirOf = (c: number) => {
+    const [a, b] = parentOf.get(c)!.link.axis
+    const len = Math.max(distance(a, b), 1e-9)
+    return { dx: (b.x - a.x) / len, dy: (b.y - a.y) / len, len }
+  }
+  const parallel = (c1: number, c2: number) => {
+    const d1 = dirOf(c1)
+    const d2 = dirOf(c2)
+    return Math.abs(d1.dx * d2.dy - d1.dy * d2.dx) < 0.02 && Math.abs(d1.len - d2.len) < Math.max(1, d1.len * 0.03)
+  }
+
+  // Gövde zinciri: kökten, kök kırımlarına paralel ve aynı uzunlukta kırımlarla ilerleyen paneller.
+  const body = new Set([rootIdx])
+  const rootKids = children.get(rootIdx) ?? []
+  const seedKids = rootKids.filter((c) => rootKids.some((o) => o !== c && parallel(c, o)) || (children.get(c) ?? []).some((g) => parallel(c, g)))
+  const stack = [...seedKids]
+  while (stack.length) {
+    const c = stack.pop()!
+    body.add(c)
+    for (const g of children.get(c) ?? []) if (parallel(c, g) && !body.has(g)) stack.push(g)
+  }
+  const bodyList = [...body].filter((b) => b !== rootIdx)
+  const chainDir = bodyList.length ? dirOf(bodyList[0]!) : null
+  const widthOf = (i: number) => (chainDir ? extentAlong(outlines[i]!, -chainDir.dy, chainDir.dx) : 0)
+
+  // Tüp/gövde: en az 4 panellik zincir (duvarlar + yapıştırma) ya da eşit genişlikte 3 duvar
+  // (üçgen tüp). Tepsideki duvar–taban–duvar üçlüsü gövde sayılmaz.
+  const chainWidths = [...body].map(widthOf)
+  const equalTriple = body.size === 3 && Math.max(...chainWidths) - Math.min(...chainWidths) <= Math.max(1, Math.max(...chainWidths) * 0.05)
+  const isTube = Boolean(chainDir) && (body.size >= 4 || equalTriple)
+  if (!isTube) {
+    body.clear()
+    body.add(rootIdx)
+  }
+  if (isTube && chainDir) {
+    const widths = [...body].map(widthOf)
+    const maxW = Math.max(...widths)
+    const walls = [...body].filter((i) => widthOf(i) >= maxW * 0.35)
+    const glue = [...body].filter((i) => widthOf(i) < maxW * 0.35)
+    for (const w of walls) role[w] = 'wall'
+    for (const g of glue) role[g] = 'glue'
+    const wallW = walls.map(widthOf)
+    const equal = Math.max(...wallW) - Math.min(...wallW) <= Math.max(1, Math.max(...wallW) * 0.05)
+    const k = walls.length
+    const turn = (k >= 5 || k === 3) && equal ? 360 / k : 90
+    for (const b of body) if (b !== rootIdx) angle.set(b, turn)
+  } else {
+    role[rootIdx] = 'bottom'
+    for (const c of rootKids) role[c] = 'wall'
+  }
+  if (isTube) role[rootIdx] = 'wall'
+
+  // Gövdeye bağlı diğer paneller: her duvar kenarında en büyük olan kapak, diğerleri toz kapağı.
+  const structural = new Set([...body, ...(role[rootIdx] === 'bottom' ? [rootIdx, ...rootKids] : [])])
+  const attached: number[] = []
+  for (const s of structural) for (const c of children.get(s) ?? []) if (!structural.has(c)) attached.push(c)
+  const areaOf = (i: number) => polygonArea(outlines[i]!)
+  const maxAttached = Math.max(0, ...attached.map(areaOf))
+  for (const c of attached) role[c] = areaOf(c) >= maxAttached * 0.6 ? 'lid' : 'dust'
+  // Daha derindekiler: dil / kanat.
+  for (let i = 0; i < n; i += 1) {
+    if (structural.has(i) || attached.includes(i)) continue
+    role[i] = 'flap'
+  }
+  return { role, angle }
 }
