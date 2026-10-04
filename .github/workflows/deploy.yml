@@ -1,6 +1,7 @@
-name: Deploy dev
+name: Deploy
 
-# main'e her merge: test → imaj (GHCR) → kube-objects dev overlay → ArgoCD otomatik senkron.
+# main'e her push: test → imaj (GHCR) → kube-objects dev + prod overlay → ArgoCD otomatik senkron.
+# Aynı imaj dev'de sha-xxxxxxx, prod'da prod-xxxxxxx tag'iyle çalışır.
 on:
   push:
     branches: [main]
@@ -11,7 +12,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: deploy-dev
+  group: deploy
   cancel-in-progress: false
 
 env:
@@ -27,10 +28,13 @@ jobs:
     timeout-minutes: 30
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
+      prod: ${{ steps.meta.outputs.prod }}
     steps:
       - uses: actions/checkout@v4
       - id: meta
-        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "prod=prod-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -44,7 +48,9 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.prod }}
             ${{ env.IMAGE }}:dev-latest
+            ${{ env.IMAGE }}:prod-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |
@@ -54,10 +60,20 @@ jobs:
   gitops:
     needs: image
     runs-on: ubuntu-latest
-    environment: development
+    environment: production
     steps:
       - uses: actions/checkout@v4
-      - name: kube-objects dev tag
+      - name: kube-objects dev + prod tag
         env:
+          KUBE_OBJECTS_DEPLOY_KEY: ${{ secrets.KUBE_OBJECTS_DEPLOY_KEY }}
           KUBE_OBJECTS_TOKEN: ${{ secrets.KUBE_OBJECTS_TOKEN }}
-        run: ci/bump-kube-objects-image.sh be dev "${{ needs.image.outputs.tag }}"
+        run: |
+          ci/bump-kube-objects-image.sh be dev "${{ needs.image.outputs.tag }}"
+          ci/bump-kube-objects-image.sh be prod "${{ needs.image.outputs.prod }}"
+      - name: Özet
+        run: |
+          {
+            echo "### BE yayında"
+            echo "- dev → \`${{ needs.image.outputs.tag }}\` (dev-api-diecutting.ledayazilim.com)"
+            echo "- prod → \`${{ needs.image.outputs.prod }}\` (api-diecutting.ledayazilim.com)"
+          } >> "$GITHUB_STEP_SUMMARY"

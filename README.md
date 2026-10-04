@@ -61,7 +61,8 @@ veya API anahtarıyla `x-api-key` + `x-secret-key`.
 | Workflow | Tetik | İş |
 |----------|-------|----|
 | `CI` | PR | typecheck + test |
-| `Deploy dev` | `main` push | test → `ghcr.io/sdsonbay/ledayazilim-diecutting-be:sha-xxxxxxx` → kube-objects `be/overlays/dev` → ArgoCD |
-| `Deploy prod` | **Manuel** (`production` environment onayı) | Dev'de doğrulanan imajı `prod-xxxxxxx` olarak işaretler → `be/overlays/prod` |
+| `Deploy` | `main` push | test → `ghcr.io/sdsonbay/ledayazilim-diecutting-be:{sha,prod}-xxxxxxx` → kube-objects `be/overlays/dev` + `be/overlays/prod` → ArgoCD (dev ve prod otomatik) |
+| `Prod sürüm seç (geri alma)` | **Manuel** | Var olan bir `sha-…` imajını `prod-…` olarak işaretler → `be/overlays/prod` |
 
-Repo secret'ı: `KUBE_OBJECTS_TOKEN` — kube-objects reposuna `contents: write` yetkili fine-grained PAT.
+Repo secret'ı: `KUBE_OBJECTS_DEPLOY_KEY` — kube-objects reposunda yazma yetkili deploy key'in özel anahtarı
+(alternatif: `KUBE_OBJECTS_TOKEN`, `contents: write` yetkili PAT).

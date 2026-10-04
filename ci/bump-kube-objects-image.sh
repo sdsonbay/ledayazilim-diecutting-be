@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # kube-objects reposunda bir overlay'in imaj tag'ini günceller; ArgoCD değişikliği görüp senkronlar.
 #   ci/bump-kube-objects-image.sh <be|fe> <dev|prod> <tag>
-# Gerekli env: KUBE_OBJECTS_TOKEN (kube-objects reposuna contents:write yetkili token)
+# Kimlik (biri yeterli):
+#   KUBE_OBJECTS_DEPLOY_KEY — kube-objects reposunda yazma yetkili deploy key'in özel anahtarı (tercih edilen)
+#   KUBE_OBJECTS_TOKEN      — kube-objects reposuna contents:write yetkili token
 set -euo pipefail
 
 COMPONENT="${1:?be|fe}"
@@ -10,13 +12,24 @@ IMAGE_TAG="${3:?tag}"
 
 REPO="${KUBE_OBJECTS_REPO:-sdsonbay/ledayazilim-diecutting-kubeobjects}"
 BRANCH="${KUBE_OBJECTS_BRANCH:-main}"
-TOKEN="${KUBE_OBJECTS_TOKEN:?KUBE_OBJECTS_TOKEN gerekli}"
 FILE="${COMPONENT}/overlays/${ENVIRONMENT}/kustomization.yaml"
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-git clone --depth 1 --branch "$BRANCH" "https://x-access-token:${TOKEN}@github.com/${REPO}.git" "$WORKDIR/repo"
+if [ -n "${KUBE_OBJECTS_DEPLOY_KEY:-}" ]; then
+  printf '%s\n' "$KUBE_OBJECTS_DEPLOY_KEY" > "$WORKDIR/deploy_key"
+  chmod 600 "$WORKDIR/deploy_key"
+  export GIT_SSH_COMMAND="ssh -i $WORKDIR/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+  REMOTE="git@github.com:${REPO}.git"
+elif [ -n "${KUBE_OBJECTS_TOKEN:-}" ]; then
+  REMOTE="https://x-access-token:${KUBE_OBJECTS_TOKEN}@github.com/${REPO}.git"
+else
+  echo "KUBE_OBJECTS_DEPLOY_KEY veya KUBE_OBJECTS_TOKEN gerekli" >&2
+  exit 1
+fi
+
+git clone --depth 1 --branch "$BRANCH" "$REMOTE" "$WORKDIR/repo"
 cd "$WORKDIR/repo"
 
 if [ ! -f "$FILE" ]; then

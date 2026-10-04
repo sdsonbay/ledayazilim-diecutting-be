@@ -1,8 +1,8 @@
-name: Deploy prod
+name: Prod sürüm seç (geri alma)
 
-# Manuel: Actions → "Deploy prod" → Run workflow.
-# "production" environment'ında required reviewers açık olduğundan onay gelmeden çalışmaz.
-# Yeniden derleme yok: dev'de doğrulanan imaj prod tag'iyle işaretlenir.
+# Normal yayın main push'unda otomatiktir (deploy.yml). Bu workflow prod'u belirli bir
+# imaja çekmek içindir: Actions → "Prod sürüm seç (geri alma)" → Run workflow.
+# Yeniden derleme yok: var olan imaj prod tag'iyle işaretlenir.
 on:
   workflow_dispatch:
     inputs:
@@ -16,7 +16,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: deploy-prod
+  group: deploy
   cancel-in-progress: false
 
 env:
@@ -32,14 +32,11 @@ jobs:
         id: src
         env:
           INPUT_TAG: ${{ inputs.tag }}
-          KUBE_OBJECTS_TOKEN: ${{ secrets.KUBE_OBJECTS_TOKEN }}
         run: |
           set -euo pipefail
           tag="${INPUT_TAG}"
           if [ -z "$tag" ]; then
-            tag=$(curl -fsSL -H "Authorization: Bearer ${KUBE_OBJECTS_TOKEN}" \
-              -H "Accept: application/vnd.github.raw" \
-              "https://api.github.com/repos/sdsonbay/ledayazilim-diecutting-kubeobjects/contents/be/overlays/dev/kustomization.yaml" \
+            tag=$(curl -fsSL "https://raw.githubusercontent.com/sdsonbay/ledayazilim-diecutting-kubeobjects/main/be/overlays/dev/kustomization.yaml" \
               | sed -n 's/^[[:space:]]*newTag:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}/\1/p')
           fi
           [[ "$tag" =~ ^sha-[0-9a-f]{7,40}$ ]] || { echo "Geçersiz tag: '$tag'" >&2; exit 1; }
@@ -59,6 +56,7 @@ jobs:
             "$IMAGE:${{ steps.src.outputs.tag }}"
       - name: kube-objects prod tag
         env:
+          KUBE_OBJECTS_DEPLOY_KEY: ${{ secrets.KUBE_OBJECTS_DEPLOY_KEY }}
           KUBE_OBJECTS_TOKEN: ${{ secrets.KUBE_OBJECTS_TOKEN }}
         run: ci/bump-kube-objects-image.sh be prod "${{ steps.src.outputs.prod }}"
       - name: Özet
