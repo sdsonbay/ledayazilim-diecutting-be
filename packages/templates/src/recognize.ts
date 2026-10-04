@@ -386,10 +386,14 @@ export function recognizeDieline(imported: Dieline, budgetMs = 4000): TemplateMa
   // 2) En iyi adayları gerçek üretimle doğrula ve tüm geometriyle puanla.
   let best: TemplateMatch | null = null
   const seen = new Set<string>()
+  let exactSeen = false
   for (const cand of rough.slice(0, 24)) {
     if (Date.now() - started > budgetMs) break
-    const key = `${cand.model.def.id}`
-    if (seen.has(key)) continue
+    // Birebir eşleşme bulunduysa yalnız aynı kaba sapmadaki (kardeş) adaylara bakılır.
+    if (exactSeen && cand.residual > 0.05) break
+    // Aynı şablon başka bir yönde (ör. aynalı) de denenebilir; yalnız aynı şablon+yön tekrarlanmaz.
+    const key = `${cand.model.def.id}|${cand.view.sym.k}|${cand.view.sym.m}`
+    if (seen.has(key) || best?.exact && best.templateId === cand.model.def.id) continue
     const fitted = fit(cand.model, cand.view.vector)
     if (!fitted || fitted.residual > Math.max(3, Math.max(cand.view.sig.width, cand.view.sig.height) * 0.03)) continue
     seen.add(key)
@@ -425,8 +429,18 @@ export function recognizeDieline(imported: Dieline, budgetMs = 4000): TemplateMa
       exact: deviation <= 0.35 && coverage >= 0.95,
     }
     // Daha az sapma; eşitse daha yüksek örtüşme. Neredeyse sıfır sapmada aramayı bitir.
-    if (!best || match.deviation < best.deviation - 0.005 || (Math.abs(match.deviation - best.deviation) <= 0.005 && match.coverage > best.coverage)) best = match
-    if (best.deviation < 0.02 && best.coverage > 0.995) break
+    // Eşitlikte (aynı çizimi üreten kardeş şablonlar) katalogda önce gelen temel şablon seçilir.
+    const order = (id: string) => templates.findIndex((tpl) => tpl.id === id)
+    const tie = best && Math.abs(match.deviation - best.deviation) <= 0.005 && Math.abs(match.coverage - best.coverage) <= 0.002
+    if (
+      !best ||
+      match.deviation < best.deviation - 0.005 ||
+      (!tie && Math.abs(match.deviation - best.deviation) <= 0.005 && match.coverage > best.coverage) ||
+      (tie && order(match.templateId) < order(best.templateId))
+    ) {
+      best = match
+    }
+    if (best.deviation < 0.02 && best.coverage > 0.995) exactSeen = true
   }
   return best
 }
