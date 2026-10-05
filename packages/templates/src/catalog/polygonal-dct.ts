@@ -400,6 +400,8 @@ function buildFrustum(spec: PolySpec, params: Record<string, ParamValue>): Dieli
   const L = Math.hypot(h, c) // yüzün düz yüksekliği
   const sinPhi = h / L
   const foldDeg = (Math.acos(sinPhi * sinPhi) * 180) / Math.PI
+  // Yüzler eğik: geniş ağızdaki kanat düz kapansın diye 90° + eğim, dar uçtaki 90° − eğim kadar katlanır.
+  const leanDeg = (Math.asin(Math.min(1, sinPhi)) * 180) / Math.PI
   const widths = [a, w, a, w]
   const tuckDepth = Math.min(16, Math.min(a, w) * 0.35)
 
@@ -511,11 +513,12 @@ function buildFrustum(spec: PolySpec, params: Record<string, ParamValue>): Dieli
       const fid = `${where}-${i + 1}`
       const pts = local(f, fl.pts)
       b.panel({ id: fid, name: fid, label: fl.label, outline: pts, role: fl.role, printable: fl.role !== 'flap' })
-      b.fold({ parent: id, child: fid, axis: [pts[0] as Pt, pts[pts.length - 1] as Pt], angle: 90 })
+      const closeDeg = where === 'top' ? 90 + leanDeg : 90 - leanDeg
+      b.fold({ parent: id, child: fid, axis: [pts[0] as Pt, pts[pts.length - 1] as Pt], angle: closeDeg })
       if (fl.tuck) {
         const tp = local(f, fl.tuck)
         b.panel({ id: `${fid}-tuck`, name: `${fid}-tuck`, label: T('Dil', 'Tuck'), outline: tp, role: 'lock', printable: false })
-        b.fold({ parent: fid, child: `${fid}-tuck`, axis: [tp[0] as Pt, tp[tp.length - 1] as Pt], angle: 90 })
+        b.fold({ parent: fid, child: `${fid}-tuck`, axis: [tp[0] as Pt, tp[tp.length - 1] as Pt], angle: closeDeg })
       }
     }
   })
@@ -573,6 +576,9 @@ function buildPyramid(spec: PolySpec, params: Record<string, ParamValue>): Dieli
   const delta = 2 * Math.asin(Math.min(0.999, s / (2 * slant)))
   const O = { x: 0, y: 0 }
   const P = (k: number): Pt => ({ x: slant * Math.cos(Math.PI / 2 - (n / 2) * delta + k * delta), y: slant * Math.sin(Math.PI / 2 - (n / 2) * delta + k * delta) })
+  // Yüz ekseninden eğik: ağızdaki kapak / dil / toz kanadı düz kapansın diye 90° + eğim.
+  const faceH = Math.sqrt(Math.max(1e-6, slant * slant - (s / 2) * (s / 2)))
+  const closeDeg = 90 + (Math.asin(Math.min(1, F / 2 / faceH)) * 180) / Math.PI
   const lidFace = Math.floor(n / 2) - 1
   const dustDepth = Math.min(16, s * 0.35)
   const tuckDepth = Math.min(16, s * 0.4)
@@ -638,14 +644,14 @@ function buildPyramid(spec: PolySpec, params: Record<string, ParamValue>): Dieli
     else b.fold({ parent: `face-${k}`, child: id, axis: [O, P(k)], angle: foldDeg })
   }
   b.panel({ id: 'lid', name: 'lid', label: T('Altıgen kapak', 'Hexagonal lid'), outline: hex, role: 'lid' })
-  b.fold({ parent: `face-${lidFace + 1}`, child: 'lid', axis: [lidA, lidB], angle: 90 })
+  b.fold({ parent: `face-${lidFace + 1}`, child: 'lid', axis: [lidA, lidB], angle: closeDeg })
   b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: T('Dil', 'Tuck'), outline: tuck, role: 'lock', printable: false })
-  b.fold({ parent: 'lid', child: 'lid-tuck', axis: [ea, eb], angle: 90 })
+  b.fold({ parent: 'lid', child: 'lid-tuck', axis: [ea, eb], angle: closeDeg })
   for (const k of [lidFace - 1, lidFace + 1]) {
     const d = dustOn(k)
     const id = `dust-${k + 1}`
-    b.panel({ id, name: id, label: T('Toz kanadı', 'Dust flap'), outline: d, role: 'flap', printable: false })
-    b.fold({ parent: `face-${k + 1}`, child: id, axis: [d[0] as Pt, d[d.length - 1] as Pt], angle: 90 })
+    b.panel({ id, name: id, label: T('Toz kanadı', 'Dust flap'), outline: d, role: 'dust', printable: false })
+    b.fold({ parent: `face-${k + 1}`, child: id, axis: [d[0] as Pt, d[d.length - 1] as Pt], angle: closeDeg })
   }
   if (glueW > 0) {
     b.panel({ id: 'glue', name: 'glue', label: T('Yapıştırma payı', 'Glue flap'), outline: glue, role: 'glue', printable: false })

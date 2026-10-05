@@ -139,7 +139,9 @@ function buildTapered(params: Record<string, ParamValue>, spec: FoodSpec): Dieli
   if (withLid) {
     pts.push({ x: L + S, y: lidY0 }, { x: L + S, y: lidFrontY })
     poly(outline, pts)
-    tuck = tuckFlapProfile({ x1: -S, x2: L + S, y: lidFrontY, direction: 1, depth: tuckDepth, clearance: Math.max(0.5, caliper), cornerRadius: 4 })
+    // Konik gövde aşağı doğru daralır: dil, girdiği derinlikteki ağız genişliğine sığacak kadar yanlardan kaçar.
+    const taperClearance = H > 0 ? (S * (lidFront + tuckDepth)) / H : 0
+    tuck = tuckFlapProfile({ x1: -S, x2: L + S, y: lidFrontY, direction: 1, depth: tuckDepth, clearance: Math.max(0.5, caliper) + taperClearance, cornerRadius: 4 })
     emitProfile(outline, reverseProfile(tuck))
     outline.lineTo({ x: -S, y: lidY0 })
   } else {
@@ -178,7 +180,7 @@ function buildTapered(params: Record<string, ParamValue>, spec: FoodSpec): Dieli
     b.fold({ parent: 'back', child: 'lid', ...foldHorizontal(lidY0, -S, L + S, 'above', 180 - wallDeg) })
     b.panel({ id: 'lid-front', name: 'lid-front', label: T('Kapak önü', 'Lid front'), outline: rectPoints(-S, lidY1, L + 2 * S, lidFront), role: 'wall' })
     b.fold({ parent: 'lid', child: 'lid-front', ...foldHorizontal(lidY1, -S, L + S, 'above') })
-    b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: T('Kapak dili', 'Lid tuck'), outline: profileToPolygon(tuck), role: 'flap', printable: false })
+    b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: T('Kapak dili', 'Lid tuck'), outline: profileToPolygon(tuck), role: 'lock', printable: false })
     b.fold({ parent: 'lid-front', child: 'lid-tuck', ...foldHorizontal(lidFrontY, -S, L + S, 'above') })
   }
 
@@ -362,7 +364,7 @@ function buildGussetCarton(params: Record<string, ParamValue>, spec: FoodSpec): 
     if (withTuck) {
       const y = side === 'top' ? H + D : -D
       const prof = tuckFlapProfile({ x1: c.x1 + gap, x2: c.x2 - gap, y, direction: side === 'top' ? 1 : -1, depth: tuck, clearance: Math.max(0.5, caliper), cornerRadius: 4 })
-      b.panel({ id: `${id}-tuck`, name: `${id}-tuck`, label: T('Dil', 'Tuck'), outline: profileToPolygon(prof), role: 'flap', printable: false })
+      b.panel({ id: `${id}-tuck`, name: `${id}-tuck`, label: T('Dil', 'Tuck'), outline: profileToPolygon(prof), role: 'lock', printable: false })
       b.fold({ parent: id, child: `${id}-tuck`, ...foldHorizontal(y, c.x1 + gap, c.x2 - gap, side === 'top' ? 'above' : 'below') })
     }
   }
@@ -525,7 +527,7 @@ function buildWedge(params: Record<string, ParamValue>, spec: FoodSpec): Dieline
   const lidDeg = 90 + (Math.atan2(Hb - h1, W) * 180) / Math.PI
   b.panel({ id: 'lid', name: 'lid', label: T('Eğik kapak', 'Sloped lid'), outline: rectPoints(0, lidY0, L, slope), role: 'lid' })
   b.fold({ parent: 'back', child: 'lid', ...foldHorizontal(lidY0, 0, L, 'above', lidDeg) })
-  b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: T('Kapak dili', 'Lid tuck'), outline: profileToPolygon(tuck), role: 'flap', printable: false })
+  b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: T('Kapak dili', 'Lid tuck'), outline: profileToPolygon(tuck), role: 'lock', printable: false })
   b.fold({ parent: 'lid', child: 'lid-tuck', ...foldHorizontal(lidY1, 0, L, 'above', 180 - lidDeg) })
   b.panel({ id: 'end-left', name: 'end-left', label: T('Sol uç', 'Left end'), outline: endL, role: 'wall' })
   b.fold({ parent: 'base', child: 'end-left', ...foldVertical(0, 0, W, 'left') })

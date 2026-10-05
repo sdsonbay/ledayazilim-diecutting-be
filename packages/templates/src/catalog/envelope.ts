@@ -55,7 +55,7 @@ function buildEnvelope(params: Record<string, ParamValue>): Dieline {
       { x: -side, y: W - side * 0.35 },
       { x: -side, y: side * 0.35 },
     ],
-    role: 'flap',
+    role: 'gusset',
   })
   b.panel({
     id: 'right',
@@ -67,7 +67,7 @@ function buildEnvelope(params: Record<string, ParamValue>): Dieline {
       { x: L + side, y: W - side * 0.35 },
       { x: L, y: W },
     ],
-    role: 'flap',
+    role: 'gusset',
   })
   b.panel({
     id: 'top',
@@ -81,10 +81,11 @@ function buildEnvelope(params: Record<string, ParamValue>): Dieline {
     role: 'flap',
   })
 
-  b.fold({ parent: 'back', child: 'bottom', ...foldHorizontal(0, 0, L, 'below') })
-  b.fold({ parent: 'back', child: 'top', ...foldHorizontal(W, 0, L, 'above') })
-  b.fold({ parent: 'back', child: 'left', ...foldVertical(0, 0, W, 'left') })
-  b.fold({ parent: 'back', child: 'right', ...foldVertical(L, 0, W, 'right') })
+  // Zarf kanatları sırtın üzerine düz (180°) kapanır: önce yan kanatlar, üstüne alt kanat, en üste kapak dili.
+  b.fold({ parent: 'back', child: 'left', ...foldVertical(0, 0, W, 'left', 180) })
+  b.fold({ parent: 'back', child: 'right', ...foldVertical(L, 0, W, 'right', 180) })
+  b.fold({ parent: 'back', child: 'bottom', ...foldHorizontal(0, 0, L, 'below', 180) })
+  b.fold({ parent: 'back', child: 'top', ...foldHorizontal(W, 0, L, 'above', 180) })
 
   if (bleed > 0) {
     b.guide('bleed', rectPath(-side - bleed, -bottom - bleed, L + 2 * side + 2 * bleed, W + top + bottom + 2 * bleed), 'taşma payı')

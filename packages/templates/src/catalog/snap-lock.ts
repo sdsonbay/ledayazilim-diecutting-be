@@ -12,8 +12,12 @@ import {
   reverseProfile,
   snapLockMajorProfile,
   snapLockMinorProfile,
+  tuckClosure,
   tuckFlapProfile,
+  type TuckClosure,
   type Profile,
+  autoTongueDepth,
+  emitTuckClosure,
 } from '../features.ts'
 import { bool, num, type ParamValue, type TemplateDefinition } from '../types.ts'
 
@@ -36,8 +40,11 @@ function buildSnapLock(params: Record<string, ParamValue>): Dieline {
   const bleed = num(params, 'bleed')
 
   const tuckDepthParam = num(params, 'tuckDepth')
-  const tuckDepth = tuckDepthParam > 0 ? tuckDepthParam : Math.max(6, W - 2 * caliper)
-  const dustDepth = Math.max(4, tuckDepth - Math.max(1.5, 2 * caliper))
+  // Üst kapanış: kapak (kutu derinliği) + kırımla ayrılan dil (ön duvarın içine girer).
+  const lidDepth = W
+  const tongueDepth = tuckDepthParam > 0 ? tuckDepthParam : autoTongueDepth(W, H)
+  const tuckDepth = lidDepth + tongueDepth
+  const dustDepth = Math.max(4, W - 2 * caliper - Math.max(1.5, 2 * caliper))
   const clearance = Math.max(0.5, caliper)
   const minorDepth = Math.max(8, W * 0.38)
   const majorDepth = Math.max(12, W * 0.55)
@@ -66,8 +73,12 @@ function buildSnapLock(params: Record<string, ParamValue>): Dieline {
     params,
   )
 
-  const tuck = (seg: { x1: number; x2: number }, y: number, direction: 1 | -1): Profile =>
-    tuckFlapProfile({ x1: seg.x1, x2: seg.x2, y, direction, depth: tuckDepth, clearance, cornerRadius })
+  const closures = new Map<Profile, TuckClosure>()
+  const tuck = (seg: { x1: number; x2: number }, y: number, direction: 1 | -1): Profile => {
+    const c = tuckClosure(tuckFlapProfile, { x1: seg.x1, x2: seg.x2, y, direction, depth: tongueDepth, clearance, cornerRadius, lidDepth })
+    closures.set(c.outer, c)
+    return c.outer
+  }
   const dust = (seg: { x1: number; x2: number }, y: number, direction: 1 | -1): Profile =>
     dustFlapProfile({ x1: seg.x1, x2: seg.x2, y, direction, depth: dustDepth, chamfer: dustChamfer })
 
@@ -139,6 +150,11 @@ function buildSnapLock(params: Record<string, ParamValue>): Dieline {
   ]
 
   for (const [id, profile, parent, label, role] of flapPanels) {
+    const closure = closures.get(profile)
+    if (closure) {
+      emitTuckClosure(b, closure, { id, parent, label })
+      continue
+    }
     b.panel({ id, name: id, label, outline: profileToPolygon(profile), role, printable: role === 'flap' })
     const isTop = id.startsWith('top')
     const start = profile[0] as { p: { x: number } }

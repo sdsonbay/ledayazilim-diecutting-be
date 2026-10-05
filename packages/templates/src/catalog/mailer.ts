@@ -103,7 +103,7 @@ function build0427(params: Record<string, ParamValue>): Dieline {
   b.panel({ id: 'left', name: 'left', label: { tr: 'Sol duvar', en: 'Left wall' }, outline: rectPoints(-H, 0, H, W), role: 'wall' })
   b.panel({ id: 'right', name: 'right', label: { tr: 'Sağ duvar', en: 'Right wall' }, outline: rectPoints(L, 0, H, W), role: 'wall' })
   b.panel({ id: 'lid', name: 'lid', label: { tr: 'Kapak', en: 'Lid' }, outline: rectPoints(0, lidY0, L, W), role: 'lid' })
-  b.panel({ id: 'tuck', name: 'lid-tuck', label: { tr: 'Kapak dili', en: 'Lid tuck' }, outline: profileToPolygon(tuck), role: 'flap' })
+  b.panel({ id: 'tuck', name: 'lid-tuck', label: { tr: 'Kapak dili', en: 'Lid tuck' }, outline: profileToPolygon(tuck), role: 'lock' })
   b.panel({
     id: 'lid-dust-left',
     name: 'lid-dust-left',

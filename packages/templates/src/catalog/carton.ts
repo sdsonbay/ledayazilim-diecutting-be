@@ -2,9 +2,11 @@ import { DielineBuilder, PathBuilder, circlePath, rectPath, rectPoints, stadiumP
 import {
   angledDustFlapProfile,
   autoBottomFlapProfile,
+  autoTongueDepth,
   dustFlapProfile,
   edgeWithThumbNotch,
   emitProfile,
+  emitTuckClosure,
   flatEdge,
   foldDiagonal,
   foldHorizontal,
@@ -20,6 +22,7 @@ import {
   snapLockMajorProfile,
   snapLockMinorProfile,
   tuckByStyle,
+  tuckClosure,
   tuckFlapProfile,
   type Profile,
 } from '../features.ts'
@@ -108,6 +111,9 @@ interface EndContext {
   H: number
   caliper: number
   tuckDepth: number
+  /** Tuck kapanışında kapak (kutu derinliği) ve ucundaki dil. */
+  lidDepth: number
+  tongueDepth: number
   dustDepth: number
   clearance: number
   cornerRadius: number
@@ -191,7 +197,7 @@ interface TuckOptions {
 }
 
 const tuckEnd = (ctx: EndContext, prefix: 'top' | 'bottom', y: number, d: Dir, o: TuckOptions): EndPlan => {
-  const { tuckDepth, clearance, cornerRadius, dustChamfer, caliper } = ctx
+  const { clearance, cornerRadius, dustChamfer, caliper } = ctx
   // Askı arka panelde; dil zorunlu olarak öne geçer.
   const side: PanelSide = o.hanger ? 'front' : o.side
   const tuckSeg = segOf(ctx, side)
@@ -201,12 +207,13 @@ const tuckEnd = (ctx: EndContext, prefix: 'top' | 'bottom', y: number, d: Dir, o
   const dustSlits = sitLock || (plain && ctx.dustFlapStyle === 'slit')
   const isEars = o.style === 'ears' || o.style === 'ears-slit'
 
-  const tuckOpts = { x1: tuckSeg.x1, x2: tuckSeg.x2, y, direction: d, depth: tuckDepth, clearance, cornerRadius }
-  const tuck: Profile = plain
-    ? tuckByStyle(ctx.tuckFlapStyle, tuckOpts, sitLock)
-    : sitLock
-      ? sitLockTuckProfile(tuckOpts)
-      : tuckFlapProfile(tuckOpts)
+  const tuckOpts = { x1: tuckSeg.x1, x2: tuckSeg.x2, y, direction: d, depth: ctx.tongueDepth, clearance, cornerRadius, lidDepth: ctx.lidDepth }
+  // Kapak (kutu derinliği) + kırımla ayrılan dil: dil karşı duvarın içine girer.
+  const closure = tuckClosure(
+    (o) => (plain ? tuckByStyle(ctx.tuckFlapStyle, o, sitLock) : sitLock ? sitLockTuckProfile(o) : tuckFlapProfile(o)),
+    tuckOpts,
+  )
+  const tuck: Profile = closure.outer
 
   const holeTabs = prefix === 'top' && ctx.spec.holeTabs === true
   const dustDepth = holeTabs ? Math.max(ctx.dustDepth, 22) : isEars ? Math.max(4, Math.min(ctx.dustDepth * 0.5, ctx.W * 0.45)) : ctx.dustDepth
@@ -237,9 +244,9 @@ const tuckEnd = (ctx: EndContext, prefix: 'top' | 'bottom', y: number, d: Dir, o
 
   return {
     profiles: arrange(side, tuck, other, leftP, rightP),
-    extent: Math.max(tuckDepth, dustDepth, o.hanger ? ctx.hangHeight : 0),
+    extent: Math.max(ctx.lidDepth + ctx.tongueDepth, dustDepth, o.hanger ? ctx.hangHeight : 0),
     emit: (b) => {
-      flapPanel(b, `${prefix}-tuck`, side, tuck, labelOf(prefix, 'kapak dili', 'tuck flap'), 'flap', y, d)
+      emitTuckClosure(b, closure, { id: `${prefix}-tuck`, parent: side, label: labelOf(prefix, 'kapak dili', 'tuck flap') })
       flapPanel(b, `${prefix}-dust-left`, 'left', leftP, labelOf(prefix, holeTabs ? 'sol askı kulağı' : 'sol toz kapağı', holeTabs ? 'left hang tab' : 'left dust flap'), holeTabs ? 'flap' : 'dust', y, d, holeTabs ? 0 : 90)
       flapPanel(b, `${prefix}-dust-right`, 'right', rightP, labelOf(prefix, holeTabs ? 'sağ askı kulağı' : 'sağ toz kapağı', holeTabs ? 'right hang tab' : 'right dust flap'), holeTabs ? 'flap' : 'dust', y, d, holeTabs ? 0 : 90)
 
@@ -251,8 +258,8 @@ const tuckEnd = (ctx: EndContext, prefix: 'top' | 'bottom', y: number, d: Dir, o
       }
       if (prefix === 'top' && ctx.spec.carryHandle) {
         const hw = Math.min(90, tuckSeg.width * 0.55)
-        const hh = Math.min(24, tuckDepth * 0.35)
-        if (hw >= 30 && hh >= 8) b.cut(stadiumPath({ x: (tuckSeg.x1 + tuckSeg.x2) / 2, y: y + d * tuckDepth * 0.5 }, hw, hh), 'taşıma el deliği')
+        const hh = Math.min(24, ctx.lidDepth * 0.35)
+        if (hw >= 30 && hh >= 8) b.cut(stadiumPath({ x: (tuckSeg.x1 + tuckSeg.x2) / 2, y: y + d * ctx.lidDepth * 0.5 }, hw, hh), 'taşıma el deliği')
         else b.warn('handle-small', 'warning', 'Kapak dili el deliği için küçük; delik atlandı.', 'Tuck flap too small for a hand hole; skipped.')
       }
 
@@ -582,7 +589,7 @@ const lidLockEnd = (ctx: EndContext, prefix: 'top' | 'bottom', y: number, d: Dir
       b.fold({ parent: side, child: lidId, ...foldHorizontal(y, lidSeg.x1, lidSeg.x2, d === 1 ? 'above' : 'below') })
       const lipId = `${prefix}-lip`
       const lipPoly: Point[] = [{ x: lidSeg.x1 + g, y: yLip }, { x: lidSeg.x1 + g, y: yLipEnd }, { x: lidSeg.x2 - g, y: yLipEnd }, { x: lidSeg.x2 - g, y: yLip }]
-      b.panel({ id: lipId, name: lipId, label: labelOf(prefix, 'kapak dudağı', 'lid lip'), outline: lipPoly, role: 'flap', printable: true })
+      b.panel({ id: lipId, name: lipId, label: labelOf(prefix, 'kapak dudağı', 'lid lip'), outline: lipPoly, role: 'lock', printable: true })
       b.fold({ parent: lidId, child: lipId, ...foldHorizontal(yLip, lidSeg.x1 + g, lidSeg.x2 - g, d === 1 ? 'above' : 'below') })
       for (const x1 of [tl1, tr2 - tabW]) {
         // Karşı panelde yarık — dil eni + pay, üst kenardan dudak derinliği kadar aşağıda değil, kenara yakın
@@ -687,7 +694,10 @@ function buildCarton(spec: CartonSpec, params: Record<string, ParamValue>): Diel
   const hangTab = isTuckLike(spec.top) ? bool(params, 'hangTab') : false
 
   const tuckDepthParam = num(params, 'tuckDepth')
-  const tuckDepth = tuckDepthParam > 0 ? tuckDepthParam : Math.max(6, W - 2 * caliper)
+  // Kapanış derinliği (diğer uç tiplerinin ölçüsü) ve tuck kapanışının kapak + dil ölçüleri.
+  const tuckDepth = Math.max(6, W - 2 * caliper)
+  const lidDepth = W
+  const tongueDepth = tuckDepthParam > 0 ? tuckDepthParam : autoTongueDepth(W, H)
   const dustDepth = Math.max(4, tuckDepth - Math.max(1.5, 2 * caliper))
 
   const [back, left, front, right] = girthLayout([L, W, L, W]) as [Seg, Seg, Seg, Seg]
@@ -702,6 +712,8 @@ function buildCarton(spec: CartonSpec, params: Record<string, ParamValue>): Diel
     H,
     caliper,
     tuckDepth,
+    lidDepth,
+    tongueDepth,
     dustDepth,
     clearance: Math.max(0.5, caliper),
     cornerRadius,
@@ -827,8 +839,8 @@ function buildCarton(spec: CartonSpec, params: Record<string, ParamValue>): Diel
   }
   if (glueWidth > 0) b.guide('glue', rectPath(glueX1, 0, glueWidth, H), 'yapıştırma alanı')
 
-  if (tuckDepth > W && (isTuckLike(spec.top) || isTuckLike(spec.bottom))) {
-    b.warn('tuck-too-deep', 'warning', 'Kapak dili kutu derinliğinden uzun; kapanırken karşı duvara çarpar.', 'Tuck depth exceeds box depth; the flap will hit the opposite wall.')
+  if (tongueDepth > H * 0.8 && (isTuckLike(spec.top) || isTuckLike(spec.bottom))) {
+    b.warn('tuck-too-deep', 'warning', 'Kapak dili gövde yüksekliğine göre çok uzun; ön duvarın içine sığmaz.', 'Tuck tongue is too long for the body height; it will not fit inside the front wall.')
   }
   if (glueWidth > 0 && glueWidth < 8) {
     b.warn('glue-flap-narrow', 'warning', 'Yapıştırma payı 8 mm’den dar; otomatik yapıştırma makinesinde tutunma zayıf olur.', 'Glue flap narrower than 8 mm; bonding on an automatic gluer will be weak.')
@@ -857,7 +869,7 @@ const paramsFor = (spec: CartonSpec): ParamDef[] => {
     { kind: 'number', key: 'height', label: { tr: 'Yükseklik (c)', en: 'Height (c)' }, unit: 'mm', min: 10, max: 2000, step: 0.5, default: dims.c, group: 'dimensions' },
     { kind: 'number', key: 'caliper', label: { tr: 'Malzeme kalınlığı', en: 'Material thickness' }, unit: 'mm', min: 0.1, max: 8, step: 0.05, default: caliper, group: 'material' },
     { kind: 'number', key: 'glueFlap', label: { tr: 'Yapıştırma payı (d5)', en: 'Glue flap (d5)' }, unit: 'mm', min: 0, max: 80, step: 0.5, default: 15, group: 'construction' },
-    { kind: 'number', key: 'tuckDepth', label: { tr: 'Kapak derinliği (d4)', en: 'Flap depth (d4)' }, unit: 'mm', min: 0, max: 600, step: 0.5, default: 0, autoWhenZero: true, advanced: true, group: 'construction' },
+    { kind: 'number', key: 'tuckDepth', label: { tr: 'Kapak dili derinliği', en: 'Tuck tongue depth' }, unit: 'mm', min: 0, max: 600, step: 0.5, default: 0, autoWhenZero: true, advanced: true, group: 'construction' },
     { kind: 'number', key: 'dustFlapChamfer', label: { tr: 'Toz kapağı pahı', en: 'Dust flap chamfer' }, unit: 'mm', min: 0, max: 25, step: 0.5, default: 3, advanced: true, group: 'construction' },
     { kind: 'number', key: 'tuckCornerRadius', label: { tr: 'Dil köşe yarıçapı', en: 'Tuck corner radius' }, unit: 'mm', min: 0, max: 25, step: 0.5, default: 3, advanced: true, group: 'construction' },
   ]

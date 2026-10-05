@@ -182,6 +182,8 @@ function buildWallet(spec: SpecialSpec, params: Record<string, ParamValue>): Die
   const yFront = -c
   const tuckPts = roundedFlap(g, a - g, yTuck, 1, tuck, Math.min(tuck * 0.6, 12))
   const lipPts = roundedFlap(g, a - g, yFront, -1, lipD, Math.min(lipD * 0.6, 8))
+  // Kapak toz kapakları önde dudak + dil kalınlığı kadar erken biter: dil ön duvarın içine geçebilsin.
+  const dustInset = 3 * caliper + g
 
   const pb = new PathBuilder()
   pb.moveTo({ x: 0, y: 0 })
@@ -201,11 +203,13 @@ function buildWallet(spec: SpecialSpec, params: Record<string, ParamValue>): Die
   // kapak sağ toz kapağı
   pb.lineTo({ x: a, y: yLid + g })
   pb.lineTo({ x: a + tuck * 0.8, y: yLid + g + 2 })
-  pb.lineTo({ x: a + tuck * 0.8, y: yTuck - 3 })
+  pb.lineTo({ x: a + tuck * 0.8, y: yTuck - dustInset - 3 })
+  pb.lineTo({ x: a, y: yTuck - dustInset })
   pb.lineTo({ x: a, y: yTuck })
   for (let i = tuckPts.length - 1; i >= 0; i--) pb.lineTo(tuckPts[i] as Pt)
   pb.lineTo({ x: 0, y: yTuck })
-  pb.lineTo({ x: -tuck * 0.8, y: yTuck - 3 })
+  pb.lineTo({ x: 0, y: yTuck - dustInset })
+  pb.lineTo({ x: -tuck * 0.8, y: yTuck - dustInset - 3 })
   pb.lineTo({ x: -tuck * 0.8, y: yLid + g + 2 })
   pb.lineTo({ x: 0, y: yLid + g })
   pb.lineTo({ x: 0, y: yLid })
@@ -222,7 +226,7 @@ function buildWallet(spec: SpecialSpec, params: Record<string, ParamValue>): Die
   b.root('base')
   b.panel({ id: 'front', name: 'front', label: T('Ön', 'Front'), outline: rectPoints(0, yFront, a, c), role: 'wall' })
   b.fold({ parent: 'base', child: 'front', ...foldHorizontal(0, 0, a, 'below') })
-  b.panel({ id: 'front-lip', name: 'front-lip', label: T('Ön dudak', 'Front lip'), outline: lipPts, role: 'flap' })
+  b.panel({ id: 'front-lip', name: 'front-lip', label: T('Ön dudak', 'Front lip'), outline: lipPts, role: 'gusset' })
   b.fold({ parent: 'front', child: 'front-lip', ...foldHorizontal(yFront, g, a - g, 'below', 175) })
   b.panel({ id: 'back', name: 'back', label: T('Arka', 'Back'), outline: rectPoints(0, yBack, a, c), role: 'wall' })
   b.fold({ parent: 'base', child: 'back', ...foldHorizontal(bW, 0, a, 'above') })
@@ -236,12 +240,12 @@ function buildWallet(spec: SpecialSpec, params: Record<string, ParamValue>): Die
   b.fold({ parent: 'back', child: 'glue-right', ...foldVertical(a, yBack + g, yLid, 'right') })
   b.panel({ id: 'lid', name: 'lid', label: T('Kapak', 'Lid'), outline: rectPoints(0, yLid, a, bW), role: 'lid', printable: true })
   b.fold({ parent: 'back', child: 'lid', ...foldHorizontal(yLid, 0, a, 'above') })
-  b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: T('Kapak dili', 'Lid tuck'), outline: tuckPts, role: 'flap', printable: true })
+  b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: T('Kapak dili', 'Lid tuck'), outline: tuckPts, role: 'lock', printable: true })
   b.fold({ parent: 'lid', child: 'lid-tuck', ...foldHorizontal(yTuck, g, a - g, 'above') })
-  b.panel({ id: 'lid-dust-left', name: 'lid-dust-left', label: T('Kapak sol toz kapağı', 'Lid left dust flap'), outline: [{ x: 0, y: yLid + g }, { x: -tuck * 0.8, y: yLid + g + 2 }, { x: -tuck * 0.8, y: yTuck - 3 }, { x: 0, y: yTuck }], role: 'dust' })
-  b.fold({ parent: 'lid', child: 'lid-dust-left', ...foldVertical(0, yLid + g, yTuck, 'left') })
-  b.panel({ id: 'lid-dust-right', name: 'lid-dust-right', label: T('Kapak sağ toz kapağı', 'Lid right dust flap'), outline: [{ x: a, y: yLid + g }, { x: a + tuck * 0.8, y: yLid + g + 2 }, { x: a + tuck * 0.8, y: yTuck - 3 }, { x: a, y: yTuck }], role: 'dust' })
-  b.fold({ parent: 'lid', child: 'lid-dust-right', ...foldVertical(a, yLid + g, yTuck, 'right') })
+  b.panel({ id: 'lid-dust-left', name: 'lid-dust-left', label: T('Kapak sol toz kapağı', 'Lid left dust flap'), outline: [{ x: 0, y: yLid + g }, { x: -tuck * 0.8, y: yLid + g + 2 }, { x: -tuck * 0.8, y: yTuck - dustInset - 3 }, { x: 0, y: yTuck - dustInset }], role: 'dust' })
+  b.fold({ parent: 'lid', child: 'lid-dust-left', ...foldVertical(0, yLid + g, yTuck - dustInset, 'left') })
+  b.panel({ id: 'lid-dust-right', name: 'lid-dust-right', label: T('Kapak sağ toz kapağı', 'Lid right dust flap'), outline: [{ x: a, y: yLid + g }, { x: a + tuck * 0.8, y: yLid + g + 2 }, { x: a + tuck * 0.8, y: yTuck - dustInset - 3 }, { x: a, y: yTuck - dustInset }], role: 'dust' })
+  b.fold({ parent: 'lid', child: 'lid-dust-right', ...foldVertical(a, yLid + g, yTuck - dustInset, 'right') })
   b.guide('glue', rectPath(-glueW + 1, yBack + g + 3, glueW - 2, c - 6), 'yapıştırma alanı')
   b.guide('glue', rectPath(a + 1, yBack + g + 3, glueW - 2, c - 6), 'yapıştırma alanı')
   const ext = Math.max(c, glueW, tuck * 0.8)
@@ -276,6 +280,8 @@ function buildGiftTray(spec: SpecialSpec, params: Record<string, ParamValue>): D
   const yLid = bW + c
   const yTuck = yLid + bW
   const tuckPts = roundedFlap(g, a - g, yTuck, 1, tuck, r)
+  // Kapak toz kapakları önde dil kalınlığı kadar erken biter: dil ön duvarın içine geçebilsin.
+  const dustInset = 2 * caliper + g
 
   const pb = new PathBuilder()
   pb.moveTo({ x: 0, y: 0 })
@@ -296,11 +302,13 @@ function buildGiftTray(spec: SpecialSpec, params: Record<string, ParamValue>): D
   pb.lineTo({ x: a, y: yLid })
   pb.lineTo({ x: a, y: yLid + g })
   pb.lineTo({ x: a + dust, y: yLid + g + 2 })
-  pb.lineTo({ x: a + dust, y: yTuck - (rounded ? r : 2) })
+  pb.lineTo({ x: a + dust, y: yTuck - dustInset - (rounded ? r : 2) })
+  pb.lineTo({ x: a, y: yTuck - dustInset })
   pb.lineTo({ x: a, y: yTuck })
   for (let i = tuckPts.length - 1; i >= 0; i--) pb.lineTo(tuckPts[i] as Pt)
   pb.lineTo({ x: 0, y: yTuck })
-  pb.lineTo({ x: -dust, y: yTuck - (rounded ? r : 2) })
+  pb.lineTo({ x: 0, y: yTuck - dustInset })
+  pb.lineTo({ x: -dust, y: yTuck - dustInset - (rounded ? r : 2) })
   pb.lineTo({ x: -dust, y: yLid + g + 2 })
   pb.lineTo({ x: 0, y: yLid + g })
   pb.lineTo({ x: 0, y: yLid })
@@ -333,12 +341,12 @@ function buildGiftTray(spec: SpecialSpec, params: Record<string, ParamValue>): D
   b.fold({ parent: 'right', child: 'tab-right', ...foldVertical(a + c, -e, bW + e, 'right') })
   b.panel({ id: 'lid', name: 'lid', label: T('Kapak', 'Lid'), outline: rectPoints(0, yLid, a, bW), role: 'lid', printable: true })
   b.fold({ parent: 'back', child: 'lid', ...foldHorizontal(yLid, 0, a, 'above') })
-  b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: T('Kapak dili', 'Lid tuck'), outline: tuckPts, role: 'flap', printable: true })
+  b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: T('Kapak dili', 'Lid tuck'), outline: tuckPts, role: 'lock', printable: true })
   b.fold({ parent: 'lid', child: 'lid-tuck', ...foldHorizontal(yTuck, g, a - g, 'above') })
-  b.panel({ id: 'lid-dust-left', name: 'lid-dust-left', label: T('Kapak sol toz kapağı', 'Lid left dust flap'), outline: [{ x: 0, y: yLid + g }, { x: -dust, y: yLid + g + 2 }, { x: -dust, y: yTuck - (rounded ? r : 2) }, { x: 0, y: yTuck }], role: 'dust' })
-  b.fold({ parent: 'lid', child: 'lid-dust-left', ...foldVertical(0, yLid + g, yTuck, 'left') })
-  b.panel({ id: 'lid-dust-right', name: 'lid-dust-right', label: T('Kapak sağ toz kapağı', 'Lid right dust flap'), outline: [{ x: a, y: yLid + g }, { x: a + dust, y: yLid + g + 2 }, { x: a + dust, y: yTuck - (rounded ? r : 2) }, { x: a, y: yTuck }], role: 'dust' })
-  b.fold({ parent: 'lid', child: 'lid-dust-right', ...foldVertical(a, yLid + g, yTuck, 'right') })
+  b.panel({ id: 'lid-dust-left', name: 'lid-dust-left', label: T('Kapak sol toz kapağı', 'Lid left dust flap'), outline: [{ x: 0, y: yLid + g }, { x: -dust, y: yLid + g + 2 }, { x: -dust, y: yTuck - dustInset - (rounded ? r : 2) }, { x: 0, y: yTuck - dustInset }], role: 'dust' })
+  b.fold({ parent: 'lid', child: 'lid-dust-left', ...foldVertical(0, yLid + g, yTuck - dustInset, 'left') })
+  b.panel({ id: 'lid-dust-right', name: 'lid-dust-right', label: T('Kapak sağ toz kapağı', 'Lid right dust flap'), outline: [{ x: a, y: yLid + g }, { x: a + dust, y: yLid + g + 2 }, { x: a + dust, y: yTuck - dustInset - (rounded ? r : 2) }, { x: a, y: yTuck - dustInset }], role: 'dust' })
+  b.fold({ parent: 'lid', child: 'lid-dust-right', ...foldVertical(a, yLid + g, yTuck - dustInset, 'right') })
   // Köşe körük kırımları: yan duvar köşelerinden tabana çapraz
   if (e > 0) {
     b.creaseLine({ x: 0, y: 0 }, { x: -c, y: -e }, 'köşe körük kırımı')
@@ -602,6 +610,8 @@ function buildEcomMailer(spec: SpecialSpec, params: Record<string, ParamValue>):
   const bleed = num(params, 'bleed')
   const o = spec.mailer ?? { sides: 'single', zipperOn: 'lip' }
   const rollOver = o.sides === 'roll-over'
+  // Çift cidarlı (roll-over) yanlarda iç genişlik daralır: dudak ön duvarın içine sığsın diye yanlardan kaçar.
+  const lipInset = rollOver ? 4 * caliper + 1 : 0
   const b = new DielineBuilder(spec.id, meta(spec, caliper, false), params)
   const g = Math.max(1, caliper)
   const lip = lipParam > 0 ? lipParam : Math.max(20, Math.min(c * 0.9, 80))
@@ -671,15 +681,17 @@ function buildEcomMailer(spec: SpecialSpec, params: Record<string, ParamValue>):
   pb.lineTo({ x: a + dust, y: yLid + g })
   pb.lineTo({ x: a + dust, y: yLip - g - 3 })
   pb.lineTo({ x: a, y: yLip })
-  pb.lineTo({ x: a, y: yLip + lip - 3 })
-  pb.lineTo({ x: a - 3, y: yLip + lip })
-  pb.lineTo({ x: 3, y: yLip + lip })
-  pb.lineTo({ x: 0, y: yLip + lip - 3 })
+  if (lipInset > 0) pb.lineTo({ x: a - lipInset, y: yLip })
+  pb.lineTo({ x: a - lipInset, y: yLip + lip - 3 })
+  pb.lineTo({ x: a - lipInset - 3, y: yLip + lip })
+  pb.lineTo({ x: lipInset + 3, y: yLip + lip })
+  pb.lineTo({ x: lipInset, y: yLip + lip - 3 })
   if (o.zipperOn === 'lip') {
-    pb.lineTo({ x: 0, y: zipY0 + stripH })
-    pb.lineTo({ x: notch, y: zipY0 + stripH / 2 })
-    pb.lineTo({ x: 0, y: zipY0 })
+    pb.lineTo({ x: lipInset, y: zipY0 + stripH })
+    pb.lineTo({ x: lipInset + notch, y: zipY0 + stripH / 2 })
+    pb.lineTo({ x: lipInset, y: zipY0 })
   }
+  if (lipInset > 0) pb.lineTo({ x: lipInset, y: yLip })
   pb.lineTo({ x: 0, y: yLip })
   pb.lineTo({ x: -dust, y: yLip - g - 3 })
   pb.lineTo({ x: -dust, y: yLid + g })
@@ -736,7 +748,8 @@ function buildEcomMailer(spec: SpecialSpec, params: Record<string, ParamValue>):
       b.fold({ parent: side, child: inner, ...foldVertical(xw, 0, bW, side, 180) })
       const lock = `${side}-lock`
       b.panel({ id: lock, name: lock, label: T('Taban kilit dili', 'Base lock tab'), outline: [{ x: xi, y: 0 }, { x: xi + sgn * tab, y: 3 }, { x: xi + sgn * tab, y: bW - 3 }, { x: xi, y: bW }], role: 'lock', printable: false })
-      b.fold({ parent: inner, child: lock, ...foldVertical(xi, 0, bW, side, 90) })
+      // Dil kutunun içine doğru katlanır ve tabana yatar (yarık yanında); dışa taşmaz.
+      b.fold({ parent: inner, child: lock, ...foldVertical(xi, 0, bW, side, 90), reverse: true })
       for (const [yy, id2, hs] of [
         [-c + g, `${side}-front-flap`, 'front'],
         [bW + g, `${side}-back-flap`, 'back'],
@@ -744,7 +757,7 @@ function buildEcomMailer(spec: SpecialSpec, params: Record<string, ParamValue>):
         const y1 = hs === 'front' ? -c + g : bW + g
         const y2 = hs === 'front' ? -g : bW + c - g
         void yy
-        b.panel({ id: id2, name: id2, label: T('Köşe kanadı', 'Corner flap'), outline: [{ x: xw, y: y1 }, { x: xw + sgn * tab, y: y1 + (hs === 'front' ? 2 : 0) }, { x: xw + sgn * tab, y: y2 - (hs === 'front' ? 0 : 2) }, { x: xw, y: y2 }], role: 'flap', printable: false })
+        b.panel({ id: id2, name: id2, label: T('Köşe kanadı', 'Corner flap'), outline: [{ x: xw, y: y1 }, { x: xw + sgn * tab, y: y1 + (hs === 'front' ? 2 : 0) }, { x: xw + sgn * tab, y: y2 - (hs === 'front' ? 0 : 2) }, { x: xw, y: y2 }], role: 'gusset', printable: false })
         b.fold({ parent: hs, child: id2, ...foldVertical(x0, y1, y2, side) })
       }
       // Taban yarıkları: kilit dilleri buraya oturur
@@ -781,9 +794,10 @@ function buildEcomMailer(spec: SpecialSpec, params: Record<string, ParamValue>):
   b.fold({ parent: 'lid', child: 'lid-dust-left', ...foldVertical(0, yLid, yLip, 'left') })
   b.panel({ id: 'lid-dust-right', name: 'lid-dust-right', label: T('Kapak sağ toz kapağı', 'Lid right dust flap'), outline: [{ x: a, y: yLid }, { x: a + dust, y: yLid + g }, { x: a + dust, y: yLip - g - 3 }, { x: a, y: yLip }], role: 'dust' })
   b.fold({ parent: 'lid', child: 'lid-dust-right', ...foldVertical(a, yLid, yLip, 'right') })
-  const lipOutline: Pt[] = [{ x: 0, y: yLip }, { x: a, y: yLip }, { x: a, y: yLip + lip - 3 }, { x: a - 3, y: yLip + lip }, { x: 3, y: yLip + lip }, { x: 0, y: yLip + lip - 3 }, ...(o.zipperOn === 'lip' ? notchPts() : [])]
-  b.panel({ id: 'lip', name: 'lip', label: T('Kapak dudağı (yapışkan)', 'Lid lip (adhesive)'), outline: lipOutline, role: 'flap', printable: true })
-  b.fold({ parent: 'lid', child: 'lip', ...foldHorizontal(yLip, 0, a, 'above') })
+  const li = lipInset
+  const lipOutline: Pt[] = [{ x: li, y: yLip }, { x: a - li, y: yLip }, { x: a - li, y: yLip + lip - 3 }, { x: a - li - 3, y: yLip + lip }, { x: li + 3, y: yLip + lip }, { x: li, y: yLip + lip - 3 }, ...(o.zipperOn === 'lip' ? notchPts().map((p) => ({ x: p.x + li, y: p.y })) : [])]
+  b.panel({ id: 'lip', name: 'lip', label: T('Kapak dudağı (yapışkan)', 'Lid lip (adhesive)'), outline: lipOutline, role: 'lock', printable: true })
+  b.fold({ parent: 'lid', child: 'lip', ...foldHorizontal(yLip, li, a - li, 'above') })
 
   // Yırtma şeridi: iki paralel perfore + çekme dili; yapışkan bant kılavuzu şeridin ötesinde
   b.perf([{ c: 'M', x: notch, y: zipY0 }, { c: 'L', x: a, y: zipY0 }], 'yırtma şeridi perforesi')

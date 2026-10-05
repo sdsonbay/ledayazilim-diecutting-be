@@ -58,9 +58,17 @@ test('ters kapaklı kutunun açık ölçüsü gövde matematiğiyle uyuşuyor', 
   const dieline = generateDieline('ecma-a20-20', { length: 100, width: 50, height: 150, glueFlap: 15, caliper: 0.4, bleed: 0 })
   // Genişlik = çevre (2·uzunluk + 2·derinlik) + yapıştırma payı
   assert.equal(dieline.bounds.width, 2 * 100 + 2 * 50 + 15)
-  // Yükseklik = gövde + iki kapak dili (derinlik − 2 kalınlık)
-  const tuckDepth = 50 - 2 * 0.4
-  assert.equal(dieline.bounds.height, 150 + 2 * tuckDepth)
+  // Yükseklik = gövde + iki kapanış (kapak = derinlik, dil = derinliğin %35'i)
+  const closure = 50 + 50 * 0.35
+  assert.equal(dieline.bounds.height, 150 + 2 * closure)
+  // Kapak ile dil ayrı paneller; aralarında kırım var (dil ön duvarın içine girer).
+  for (const end of ['top', 'bottom']) {
+    const lid = dieline.panels.find((p) => p.id === `${end}-tuck`)
+    const tongue = dieline.panels.find((p) => p.id === `${end}-tuck-tongue`)
+    assert.ok(lid && tongue, end)
+    assert.equal(tongue.role, 'lock')
+    assert.ok(dieline.folds.some((f) => f.parent === `${end}-tuck` && f.child === `${end}-tuck-tongue`))
+  }
 })
 
 test('koli iç ölçü seçildiğinde panellere kalınlık payı ekliyor', () => {
@@ -308,8 +316,8 @@ test('dilli kilit dil profilini ve toz yarığını üretir', () => {
     tuckFlapStyle: 'angled',
     dustFlapStyle: 'normal',
   })
-  const top = locked.panels.find((p) => p.id === 'top-tuck')
-  const plainTop = plain.panels.find((p) => p.id === 'top-tuck')
+  const top = locked.panels.find((p) => p.id === 'top-tuck-tongue')
+  const plainTop = plain.panels.find((p) => p.id === 'top-tuck-tongue')
   assert.ok(top && plainTop)
   assert.ok(top.outline.length > plainTop.outline.length, 'kilit kulağı daha çok köşe eklemeli')
   const slits = locked.paths.filter((p) => p.note === 'toz kapağı kilit yarığı')
@@ -363,7 +371,8 @@ test('açılı yan kanat toz kapağını trapez yapar', () => {
 test('askı deliği açık ölçüyü askı kulağı kadar uzatır', () => {
   const plain = generateDieline('ecma-a20-20', { length: 100, width: 50, height: 150, glueFlap: 15, caliper: 0.4, bleed: 0, euroHole: false })
   const hang = generateDieline('ecma-a20-20', { length: 100, width: 50, height: 150, glueFlap: 15, caliper: 0.4, bleed: 0, euroHole: true, hangTabHeight: 70 })
-  assert.ok(hang.bounds.height >= plain.bounds.height + 15)
+  // Askı kulağı (70) üst kapanıştan (50 + 17.5) uzun: açık ölçü kulak kadar büyür.
+  assert.equal(hang.bounds.height, plain.bounds.height + (70 - (50 + 50 * 0.35)))
   assert.ok(hang.paths.some((p) => p.note?.includes('euroslot')))
   assert.ok(hang.panels.some((p) => p.id === 'hang-tab'))
   assert.ok(hang.folds.some((f) => f.child === 'hang-tab'))

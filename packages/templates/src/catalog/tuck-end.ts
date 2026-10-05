@@ -1,6 +1,8 @@
 import { DielineBuilder, PathBuilder, rectPath, rectPoints, stadiumPath, type Dieline } from '@diecut/core'
 import {
+  autoTongueDepth,
   dustByStyle,
+  emitTuckClosure,
   edgeWithThumbNotch,
   emitProfile,
   flatEdge,
@@ -12,7 +14,9 @@ import {
   profileToPolygon,
   reverseProfile,
   tuckByStyle,
+  tuckClosure,
   type Profile,
+  type TuckClosure,
 } from '../features.ts'
 import { bool, num, str, type ParamValue, type TemplateDefinition } from '../types.ts'
 
@@ -52,10 +56,12 @@ function buildTuckEnd(params: Record<string, ParamValue>): Dieline {
   const bleed = num(params, 'bleed')
 
   const tuckDepthParam = num(params, 'tuckDepth')
-  // Otomatik: dil, kutunun içine sürtünmeden girecek kadar derinlikten
-  // iki malzeme kalınlığı kadar kısa olmalı.
-  const tuckDepth = tuckDepthParam > 0 ? tuckDepthParam : Math.max(6, W - 2 * caliper)
-  const dustDepth = Math.max(4, tuckDepth - Math.max(1.5, 2 * caliper))
+  // Kapak kutunun derinliği kadar; ucundaki dil kırımla ayrılır ve ön duvarın içine girer.
+  const lidDepth = W
+  const tongueDepth = tuckDepthParam > 0 ? tuckDepthParam : autoTongueDepth(W, H)
+  const tuckDepth = lidDepth + tongueDepth
+  // Toz kapakları kapağın altında kalacak kadar kısa.
+  const dustDepth = Math.max(4, W - 2 * caliper - Math.max(1.5, 2 * caliper))
   const clearance = Math.max(0.5, caliper)
 
   const [back, left, front, right] = girthLayout([L, W, L, W]) as [
@@ -78,8 +84,12 @@ function buildTuckEnd(params: Record<string, ParamValue>): Dieline {
 
   const b = new DielineBuilder(style === 'straight' ? 'ecma-a20-21' : 'ecma-a20-20', meta, params)
 
-  const tuck = (seg: { x1: number; x2: number }, y: number, direction: 1 | -1, sitLock: boolean): Profile =>
-    tuckByStyle(flapStyle, { x1: seg.x1, x2: seg.x2, y, direction, depth: tuckDepth, clearance, cornerRadius }, sitLock)
+  const closures = new Map<Profile, TuckClosure>()
+  const tuck = (seg: { x1: number; x2: number }, y: number, direction: 1 | -1, sitLock: boolean): Profile => {
+    const c = tuckClosure((o) => tuckByStyle(flapStyle, o, sitLock), { x1: seg.x1, x2: seg.x2, y, direction, depth: tongueDepth, clearance, cornerRadius, lidDepth })
+    closures.set(c.outer, c)
+    return c.outer
+  }
 
   const dust = (seg: { x1: number; x2: number }, y: number, direction: 1 | -1): Profile =>
     dustByStyle(dustStyle, { x1: seg.x1, x2: seg.x2, y, direction, depth: dustDepth, chamfer: dustChamfer })
@@ -186,6 +196,11 @@ function buildTuckEnd(params: Record<string, ParamValue>): Dieline {
   ])
 
   for (const [id, profile, parent, label, role] of flapPanels) {
+    const closure = closures.get(profile)
+    if (closure) {
+      emitTuckClosure(b, closure, { id, parent, label })
+      continue
+    }
     b.panel({ id, name: id, label, outline: profileToPolygon(profile), role, printable: role === 'flap' })
     const isTop = id.startsWith('top')
     const seg = profile[0] as { p: { x: number } }
@@ -272,12 +287,12 @@ function buildTuckEnd(params: Record<string, ParamValue>): Dieline {
       'Depth is larger than length; the tuck flap may be disproportionately long.',
     )
   }
-  if (tuckDepth > W) {
+  if (tongueDepth > H * 0.8) {
     b.warn(
       'tuck-too-deep',
       'warning',
-      'Kapak dili kutu derinliğinden uzun; kapanırken karşı duvara çarpar.',
-      'Tuck depth exceeds box depth; the flap will hit the opposite wall.',
+      'Kapak dili gövde yüksekliğine göre çok uzun; ön duvarın içine sığmaz.',
+      'Tuck tongue is too long for the body height; it will not fit inside the front wall.',
     )
   }
   if (glueWidth > 0 && glueWidth < 8) {
@@ -366,7 +381,7 @@ const sharedParams: TemplateDefinition['params'] = [
     autoWhenZero: true,
     advanced: true,
     group: 'construction',
-    help: { tr: '0 bırakılırsa derinlikten kalınlık payı düşülerek hesaplanır.', en: 'Leave 0 to derive from depth minus caliper allowance.' },
+    help: { tr: 'Kapağın ucundaki, ön duvarın içine giren dil. 0 bırakılırsa derinliğin ~%35’i (8–25 mm).', en: 'The tongue at the lid tip that tucks inside the front wall. Leave 0 for ~35% of depth (8–25 mm).' },
   },
   {
     kind: 'number',

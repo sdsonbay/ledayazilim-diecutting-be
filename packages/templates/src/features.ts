@@ -1,4 +1,4 @@
-import { PathBuilder, distance, flattenPath, type Point } from '@diecut/core'
+import { PathBuilder, distance, flattenPath, type DielineBuilder, type Point } from '@diecut/core'
 
 /**
  * Kutu template'lerinin ortak geometri sözlüğü.
@@ -209,6 +209,68 @@ export function tuckByStyle(style: string, o: TuckFlapOptions, sitLock: boolean)
   if (style === 'uni') return uniTuckProfile(o)
   if (style === 'friction') return frictionTuckProfile(o)
   return tuckFlapProfile(o)
+}
+
+/**
+ * Tuck kapanışı: kutunun derinliği kadar kapak paneli + kırımla ayrılan dil.
+ * Kapak kutunun ağzını örter, dil karşı duvarın İÇİNE girer. (Dil ile kapak tek panel
+ * olursa ortada kırım olmadığı için dil kutunun dışında kalır.)
+ */
+export interface TuckClosure {
+  /** Çevre için profil: kapağın yanları + dil. */
+  outer: Profile
+  lid: Point[]
+  tongue: Profile
+  /** Kapak–dil kırımının y değeri. */
+  lidEdgeY: number
+  x1: number
+  x2: number
+  y: number
+  direction: 1 | -1
+}
+
+export function tuckClosure(tongueOf: (o: TuckFlapOptions) => Profile, o: TuckFlapOptions & { lidDepth: number }): TuckClosure {
+  const lidEdgeY = o.y + o.direction * o.lidDepth
+  const tongue = tongueOf({ ...o, y: lidEdgeY })
+  return {
+    outer: [{ p: { x: o.x1, y: o.y } }, ...tongue, { p: { x: o.x2, y: o.y } }],
+    lid: [
+      { x: o.x1, y: o.y },
+      { x: o.x2, y: o.y },
+      { x: o.x2, y: lidEdgeY },
+      { x: o.x1, y: lidEdgeY },
+    ],
+    tongue,
+    lidEdgeY,
+    x1: o.x1,
+    x2: o.x2,
+    y: o.y,
+    direction: o.direction,
+  }
+}
+
+/** Otomatik dil derinliği: derinliğin ~%35'i, 8–25 mm, gövde yüksekliğinin yarısını aşmaz. */
+export const autoTongueDepth = (depth: number, height: number): number => Math.max(8, Math.min(25, depth * 0.35, height * 0.5))
+
+/** Kapak + dil panellerini ve iki kırımı (gövde→kapak, kapak→dil) ekler. Dil kimliği `${id}-tongue`. */
+export function emitTuckClosure(
+  b: DielineBuilder,
+  c: TuckClosure,
+  o: { id: string; parent: string; label: { tr: string; en: string }; role?: 'flap' | 'lid' },
+): void {
+  const side = c.direction === 1 ? 'above' : 'below'
+  b.panel({ id: o.id, name: o.id, label: o.label, outline: c.lid, role: o.role ?? 'flap', printable: true })
+  b.fold({ parent: o.parent, child: o.id, ...foldHorizontal(c.y, c.x1, c.x2, side) })
+  const tongueId = `${o.id}-tongue`
+  b.panel({
+    id: tongueId,
+    name: tongueId,
+    label: { tr: `${o.label.tr} — dil`, en: `${o.label.en} — tongue` },
+    outline: profileToPolygon(c.tongue),
+    role: 'lock',
+    printable: true,
+  })
+  b.fold({ parent: o.id, child: tongueId, ...foldHorizontal(c.lidEdgeY, c.x1, c.x2, side) })
 }
 
 export interface DustFlapOptions {

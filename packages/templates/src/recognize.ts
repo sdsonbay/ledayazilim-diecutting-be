@@ -431,10 +431,11 @@ export function recognizeDieline(imported: Dieline, budgetMs = 4000): TemplateMa
     // Daha az sapma; eşitse daha yüksek örtüşme. Neredeyse sıfır sapmada aramayı bitir.
     // Eşitlikte (aynı çizimi üreten kardeş şablonlar) katalogda önce gelen temel şablon seçilir.
     const order = (id: string) => templates.findIndex((tpl) => tpl.id === id)
-    const tie = best && Math.abs(match.deviation - best.deviation) <= 0.005 && Math.abs(match.coverage - best.coverage) <= 0.002
+    // Kardeş şablonlar (ör. aynalı ters kapak) aynı çizimi ölçüm gürültüsü kadar farkla üretir: bunlar eşitliktir.
+    const tie = best && Math.abs(match.deviation - best.deviation) <= 0.05 && Math.abs(match.coverage - best.coverage) <= 0.01
     if (
       !best ||
-      match.deviation < best.deviation - 0.005 ||
+      (!tie && match.deviation < best.deviation - 0.005) ||
       (!tie && Math.abs(match.deviation - best.deviation) <= 0.005 && match.coverage > best.coverage) ||
       (tie && order(match.templateId) < order(best.templateId))
     ) {

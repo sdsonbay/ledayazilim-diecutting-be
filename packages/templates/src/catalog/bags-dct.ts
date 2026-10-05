@@ -85,8 +85,14 @@ function buildBag(spec: BagSpec, params: Record<string, ParamValue>): Dieline {
     b.creaseLine({ x: mid, y: -D }, { x: mid, y: top }, 'körük orta kırımı')
   }
   if (glueW > 0) {
-    b.panel({ id: 'glue', name: 'glue', label: T('Yapıştırma payı', 'Glue flap'), outline: gl, role: 'glue', printable: false })
+    // Yapıştırma payının takviye bandındaki kısmı bantla birlikte içe döner; yoksa çanta ağzından dışarı taşar.
+    const ch = Math.min(6, glueW * 0.6)
+    b.panel({ id: 'glue', name: 'glue', label: T('Yapıştırma payı', 'Glue flap'), outline: hem > 0 ? [{ x: xEnd, y: 0 }, { x: xEnd + glueW, y: Math.min(ch, top * 0.3) }, { x: xEnd + glueW, y: H }, { x: xEnd, y: H }] : gl, role: 'glue', printable: false })
     b.fold({ parent: 'gusset-left', child: 'glue', ...foldVertical(xEnd, 0, top, 'right') })
+    if (hem > 0) {
+      b.panel({ id: 'glue-top', name: 'glue-top', label: T('Yapıştırma payı (takviye)', 'Glue flap (hem)'), outline: [{ x: xEnd, y: H }, { x: xEnd + glueW, y: H }, { x: xEnd + glueW, y: top - ch }, { x: xEnd + glueW - ch, y: top }, { x: xEnd, y: top }], role: 'glue', printable: false })
+      b.fold({ parent: 'glue', child: 'glue-top', ...foldHorizontal(H, xEnd, xEnd + glueW, 'above', 180) })
+    }
     b.guide('glue', rectPath(0, 0, Math.min(glueW, L * 0.3), top), 'yapıştırma alanı')
   }
 

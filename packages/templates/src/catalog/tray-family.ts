@@ -192,15 +192,17 @@ export function buildTray(spec: TraySpec, params: Record<string, ParamValue>): D
   const lidY0 = W + H
   const lidY1 = lidY0 + W
   const lidFrontY = lidY1 + g.lidFront
+  // Teleskop kapak tepsinin dışına geçer: duvar + kapak köşe kulağı kalınlığı kadar her yandan geniş.
+  const lw = spec.lid === 'tray' ? 2 * caliper + 0.5 : 0
   let tuck: Profile | null = null
   if (spec.lid === 'tray') {
-    add({ x: L, y: lidY0 }, { x: L, y: lidY0 + g.gap }, { x: L + Hl, y: lidY0 + g.gap }, { x: L + Hl, y: lidY1 })
+    add({ x: L, y: lidY0 }, { x: L + lw, y: lidY0 }, { x: L + lw, y: lidY0 + g.gap }, { x: L + lw + Hl, y: lidY0 + g.gap }, { x: L + lw + Hl, y: lidY1 })
     if (spec.corners === 'gusset') {
-      add({ x: L + Hl, y: lidY1 + Hl })
+      add({ x: L + lw + Hl, y: lidY1 + Hl })
     } else if (spec.corners === 'flap') {
-      add({ x: L, y: lidY1 }, { x: L, y: lidY1 + g.gap }, { x: L + Hlc, y: lidY1 + g.gap }, { x: L + Hlc, y: lidY1 + Hl - cl }, { x: L + Hlc - cl, y: lidY1 + Hl })
+      add({ x: L + lw, y: lidY1 }, { x: L + lw, y: lidY1 + g.gap }, { x: L + lw + Hlc, y: lidY1 + g.gap }, { x: L + lw + Hlc, y: lidY1 + Hl - cl }, { x: L + lw + Hlc - cl, y: lidY1 + Hl })
     } else {
-      add({ x: L, y: lidY1 }, { x: L, y: lidY1 + Hl })
+      add({ x: L + lw, y: lidY1 }, { x: L + lw, y: lidY1 + Hl })
     }
   } else if (hasLid) {
     add({ x: L, y: lidY0 })
@@ -233,13 +235,13 @@ export function buildTray(spec: TraySpec, params: Record<string, ParamValue>): D
   const addL = (...p: Pt[]) => left.push(...p)
   if (spec.lid === 'tray') {
     if (spec.corners === 'gusset') {
-      addL({ x: -Hl, y: lidY1 + Hl }, { x: -Hl, y: lidY1 })
+      addL({ x: -lw - Hl, y: lidY1 + Hl }, { x: -lw - Hl, y: lidY1 })
     } else if (spec.corners === 'flap') {
-      addL({ x: -Hlc + cl, y: lidY1 + Hl }, { x: -Hlc, y: lidY1 + Hl - cl }, { x: -Hlc, y: lidY1 + g.gap }, { x: 0, y: lidY1 + g.gap }, { x: 0, y: lidY1 }, { x: -Hl, y: lidY1 })
+      addL({ x: -lw - Hlc + cl, y: lidY1 + Hl }, { x: -lw - Hlc, y: lidY1 + Hl - cl }, { x: -lw - Hlc, y: lidY1 + g.gap }, { x: -lw, y: lidY1 + g.gap }, { x: -lw, y: lidY1 }, { x: -lw - Hl, y: lidY1 })
     } else {
-      addL({ x: 0, y: lidY1 + Hl }, { x: 0, y: lidY1 }, { x: -Hl, y: lidY1 })
+      addL({ x: -lw, y: lidY1 + Hl }, { x: -lw, y: lidY1 }, { x: -lw - Hl, y: lidY1 })
     }
-    addL({ x: -Hl, y: lidY0 + g.gap }, { x: 0, y: lidY0 + g.gap }, { x: 0, y: lidY0 })
+    addL({ x: -lw - Hl, y: lidY0 + g.gap }, { x: -lw, y: lidY0 + g.gap }, { x: -lw, y: lidY0 }, { x: 0, y: lidY0 })
   } else if (hasLid) {
     addL({ x: 0, y: lidY1 })
     if (g.dustW > 0) {
@@ -387,25 +389,27 @@ export function buildTray(spec: TraySpec, params: Record<string, ParamValue>): D
 
   // Kapak
   if (spec.lid === 'tray') {
-    b.panel({ id: 'lid', name: 'lid', label: { tr: 'Kapak', en: 'Lid' }, outline: rectPoints(0, lidY0, L, W), role: 'lid' })
+    const lx0 = -lw
+    const lx1 = L + lw
+    b.panel({ id: 'lid', name: 'lid', label: { tr: 'Kapak', en: 'Lid' }, outline: rectPoints(lx0, lidY0, lx1 - lx0, W), role: 'lid' })
     b.fold({ parent: 'back', child: 'lid', ...foldHorizontal(lidY0, 0, L, 'above') })
-    b.panel({ id: 'lid-front', name: 'lid-front', label: { tr: 'Kapak ön duvarı', en: 'Lid front wall' }, outline: rectPoints(0, lidY1, L, Hl), role: 'wall' })
-    b.fold({ parent: 'lid', child: 'lid-front', ...foldHorizontal(lidY1, 0, L, 'above') })
-    b.panel({ id: 'lid-left', name: 'lid-left', label: { tr: 'Kapak sol duvarı', en: 'Lid left wall' }, outline: rectPoints(-Hl, lidY0 + g.gap, Hl, W - g.gap), role: 'wall' })
-    b.fold({ parent: 'lid', child: 'lid-left', ...foldVertical(0, lidY0 + g.gap, lidY1, 'left') })
-    b.panel({ id: 'lid-right', name: 'lid-right', label: { tr: 'Kapak sağ duvarı', en: 'Lid right wall' }, outline: rectPoints(L, lidY0 + g.gap, Hl, W - g.gap), role: 'wall' })
-    b.fold({ parent: 'lid', child: 'lid-right', ...foldVertical(L, lidY0 + g.gap, lidY1, 'right') })
+    b.panel({ id: 'lid-front', name: 'lid-front', label: { tr: 'Kapak ön duvarı', en: 'Lid front wall' }, outline: rectPoints(lx0, lidY1, lx1 - lx0, Hl), role: 'wall' })
+    b.fold({ parent: 'lid', child: 'lid-front', ...foldHorizontal(lidY1, lx0, lx1, 'above') })
+    b.panel({ id: 'lid-left', name: 'lid-left', label: { tr: 'Kapak sol duvarı', en: 'Lid left wall' }, outline: rectPoints(lx0 - Hl, lidY0 + g.gap, Hl, W - g.gap), role: 'wall' })
+    b.fold({ parent: 'lid', child: 'lid-left', ...foldVertical(lx0, lidY0 + g.gap, lidY1, 'left') })
+    b.panel({ id: 'lid-right', name: 'lid-right', label: { tr: 'Kapak sağ duvarı', en: 'Lid right wall' }, outline: rectPoints(lx1, lidY0 + g.gap, Hl, W - g.gap), role: 'wall' })
+    b.fold({ parent: 'lid', child: 'lid-right', ...foldVertical(lx1, lidY0 + g.gap, lidY1, 'right') })
     if (spec.corners === 'flap') {
-      const fl: Pt[] = [{ x: 0, y: lidY1 + g.gap }, { x: 0, y: lidY1 + Hl }, { x: -Hlc + cl, y: lidY1 + Hl }, { x: -Hlc, y: lidY1 + Hl - cl }, { x: -Hlc, y: lidY1 + g.gap }]
-      const fr: Pt[] = [{ x: L, y: lidY1 + g.gap }, { x: L, y: lidY1 + Hl }, { x: L + Hlc - cl, y: lidY1 + Hl }, { x: L + Hlc, y: lidY1 + Hl - cl }, { x: L + Hlc, y: lidY1 + g.gap }]
+      const fl: Pt[] = [{ x: lx0, y: lidY1 + g.gap }, { x: lx0, y: lidY1 + Hl }, { x: lx0 - Hlc + cl, y: lidY1 + Hl }, { x: lx0 - Hlc, y: lidY1 + Hl - cl }, { x: lx0 - Hlc, y: lidY1 + g.gap }]
+      const fr: Pt[] = [{ x: lx1, y: lidY1 + g.gap }, { x: lx1, y: lidY1 + Hl }, { x: lx1 + Hlc - cl, y: lidY1 + Hl }, { x: lx1 + Hlc, y: lidY1 + Hl - cl }, { x: lx1 + Hlc, y: lidY1 + g.gap }]
       b.panel({ id: 'lid-corner-l', name: 'lid-corner-l', label: { tr: 'Kapak köşe kulağı', en: 'Lid corner flap' }, outline: fl, role: 'glue', printable: false })
-      b.fold({ parent: 'lid-front', child: 'lid-corner-l', ...foldVertical(0, lidY1 + g.gap, lidY1 + Hl, 'left') })
+      b.fold({ parent: 'lid-front', child: 'lid-corner-l', ...foldVertical(lx0, lidY1 + g.gap, lidY1 + Hl, 'left') })
       b.panel({ id: 'lid-corner-r', name: 'lid-corner-r', label: { tr: 'Kapak köşe kulağı', en: 'Lid corner flap' }, outline: fr, role: 'glue', printable: false })
-      b.fold({ parent: 'lid-front', child: 'lid-corner-r', ...foldVertical(L, lidY1 + g.gap, lidY1 + Hl, 'right') })
+      b.fold({ parent: 'lid-front', child: 'lid-corner-r', ...foldVertical(lx1, lidY1 + g.gap, lidY1 + Hl, 'right') })
     } else if (spec.corners === 'gusset') {
       const gl: [string, string, Pt, Pt, Pt, ReturnType<typeof foldHorizontal>, 1 | -1][] = [
-        ['ll', 'lid-left', { x: 0, y: lidY1 }, { x: -Hl, y: lidY1 }, { x: -Hl, y: lidY1 + Hl }, foldHorizontal(lidY1, -Hl, 0, 'above'), -1],
-        ['lr', 'lid-right', { x: L, y: lidY1 }, { x: L + Hl, y: lidY1 }, { x: L + Hl, y: lidY1 + Hl }, foldHorizontal(lidY1, L, L + Hl, 'above'), 1],
+        ['ll', 'lid-left', { x: lx0, y: lidY1 }, { x: lx0 - Hl, y: lidY1 }, { x: lx0 - Hl, y: lidY1 + Hl }, foldHorizontal(lidY1, lx0 - Hl, lx0, 'above'), -1],
+        ['lr', 'lid-right', { x: lx1, y: lidY1 }, { x: lx1 + Hl, y: lidY1 }, { x: lx1 + Hl, y: lidY1 + Hl }, foldHorizontal(lidY1, lx1, lx1 + Hl, 'above'), 1],
       ]
       for (const [k, parent, a, wallEnd, far, fold, sign] of gl) {
         const t1 = `gusset-${k}-a`
@@ -424,7 +428,7 @@ export function buildTray(spec: TraySpec, params: Record<string, ParamValue>): D
     b.panel({ id: 'lid-front', name: 'lid-front', label: { tr: 'Kapak önü', en: 'Lid front' }, outline: rectPoints(0, lidY1, L, g.lidFront), role: 'wall' })
     b.fold({ parent: 'lid', child: 'lid-front', ...foldHorizontal(lidY1, 0, L, 'above') })
     if (tuck) {
-      b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: { tr: 'Kapak dili', en: 'Lid tuck' }, outline: profileToPolygon(tuck), role: 'flap', printable: false })
+      b.panel({ id: 'lid-tuck', name: 'lid-tuck', label: { tr: 'Kapak dili', en: 'Lid tuck' }, outline: profileToPolygon(tuck), role: 'lock', printable: false })
       b.fold({ parent: 'lid-front', child: 'lid-tuck', ...foldHorizontal(lidFrontY, 0, L, 'above') })
       if (spec.ends !== 'rollover') {
         const slotT = Math.max(2, caliper * 2 + 0.6)
@@ -443,8 +447,8 @@ export function buildTray(spec: TraySpec, params: Record<string, ParamValue>): D
   }
 
   if (bleed > 0) {
-    const minX = -Math.max(g.sideDepth + (sideTabs ? g.tabH : 0), H, g.dustW, Hl)
-    const maxX = L + Math.max(g.sideDepth + (sideTabs ? g.tabH : 0), H, g.dustW, Hl)
+    const minX = -Math.max(g.sideDepth + (sideTabs ? g.tabH : 0), H, g.dustW, Hl + lw)
+    const maxX = L + Math.max(g.sideDepth + (sideTabs ? g.tabH : 0), H, g.dustW, Hl + lw)
     const minY = -g.frontDepth - (endTabs ? g.tabH : 0)
     const maxY = hasLid ? lidFrontY + g.tuckDepth : yB + (endTabs ? g.tabH : 0)
     b.guide('bleed', rectPath(minX - bleed, minY - bleed, maxX - minX + 2 * bleed, maxY - minY + 2 * bleed), 'taşma payı')

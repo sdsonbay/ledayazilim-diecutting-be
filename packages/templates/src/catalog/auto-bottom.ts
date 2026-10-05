@@ -12,8 +12,12 @@ import {
   glueFlapProfile,
   profileToPolygon,
   reverseProfile,
+  tuckClosure,
   tuckFlapProfile,
+  type TuckClosure,
   type Profile,
+  autoTongueDepth,
+  emitTuckClosure,
 } from '../features.ts'
 import { bool, num, type ParamValue, type TemplateDefinition } from '../types.ts'
 
@@ -36,8 +40,11 @@ function buildAutoBottom(params: Record<string, ParamValue>): Dieline {
   const bleed = num(params, 'bleed')
 
   const tuckDepthParam = num(params, 'tuckDepth')
-  const tuckDepth = tuckDepthParam > 0 ? tuckDepthParam : Math.max(6, W - 2 * caliper)
-  const dustDepth = Math.max(4, tuckDepth - Math.max(1.5, 2 * caliper))
+  // Üst kapanış: kapak (kutu derinliği) + kırımla ayrılan dil (ön duvarın içine girer).
+  const lidDepth = W
+  const tongueDepth = tuckDepthParam > 0 ? tuckDepthParam : autoTongueDepth(W, H)
+  const tuckDepth = lidDepth + tongueDepth
+  const dustDepth = Math.max(4, W - 2 * caliper - Math.max(1.5, 2 * caliper))
   const clearance = Math.max(0.5, caliper)
   const bottomDepth = Math.max(10, Math.min(L, W) * 0.5 - caliper)
   const bevel = Math.min(bottomDepth * 0.92, L * 0.4, W * 0.45)
@@ -63,8 +70,12 @@ function buildAutoBottom(params: Record<string, ParamValue>): Dieline {
     params,
   )
 
-  const tuck = (seg: { x1: number; x2: number }, y: number, direction: 1 | -1): Profile =>
-    tuckFlapProfile({ x1: seg.x1, x2: seg.x2, y, direction, depth: tuckDepth, clearance, cornerRadius })
+  const closures = new Map<Profile, TuckClosure>()
+  const tuck = (seg: { x1: number; x2: number }, y: number, direction: 1 | -1): Profile => {
+    const c = tuckClosure(tuckFlapProfile, { x1: seg.x1, x2: seg.x2, y, direction, depth: tongueDepth, clearance, cornerRadius, lidDepth })
+    closures.set(c.outer, c)
+    return c.outer
+  }
   const dust = (seg: { x1: number; x2: number }, y: number, direction: 1 | -1): Profile =>
     dustFlapProfile({ x1: seg.x1, x2: seg.x2, y, direction, depth: dustDepth, chamfer: dustChamfer })
 
@@ -122,6 +133,11 @@ function buildAutoBottom(params: Record<string, ParamValue>): Dieline {
     ['top-dust-right', topProfiles[3] as Profile, 'right', { tr: 'Üst sağ toz kapağı', en: 'Top right dust flap' }, 'dust'],
   ]
   for (const [id, profile, parent, label, role] of topFlaps) {
+    const closure = closures.get(profile)
+    if (closure) {
+      emitTuckClosure(b, closure, { id, parent, label })
+      continue
+    }
     b.panel({ id, name: id, label, outline: profileToPolygon(profile), role, printable: role === 'flap' })
     const start = profile[0] as { p: { x: number } }
     const end = profile[profile.length - 1] as { p: { x: number } }
